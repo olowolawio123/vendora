@@ -1,0 +1,23 @@
+[
+  {
+    "_id": {
+      "$oid": "6aab2280f7ed584943a229d4"
+    },
+    "name": "olowolwi michael",
+    "email": "olowolawio@gmail.com",
+    "phone": "+2348132893350",
+    "phoneVerified": false,
+    "password": "$2b$12$1auuk6M1Klvee7hQJfK87eDkdwaBDUKrhKen59LyP3tlgQibHbp2K",
+    "profileImage": "",
+    "passwordResetToken": "",
+    "passwordResetExpires": null,
+    "role": "buyer",
+    "createdAt": {
+      "$date": "2026-09-16T23:13:04.436Z"
+    },
+    "updatedAt": {
+      "$date": "2026-09-16T23:13:04.436Z"
+    },
+    "__v": 0
+  }
+]
