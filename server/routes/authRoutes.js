@@ -209,7 +209,6 @@ router.post("/register", async (req, res) => {
 | LOGIN
 |--------------------------------------------------------------------------
 */
-
 router.post("/login", async (req, res) => {
   try {
     const {
@@ -274,6 +273,7 @@ router.post("/login", async (req, res) => {
       }
     );
 
+    // Keep the secure HttpOnly cookie authentication
     res.cookie("token", token, {
       httpOnly: true,
       secure:
@@ -286,9 +286,13 @@ router.post("/login", async (req, res) => {
         7 * 24 * 60 * 60 * 1000,
     });
 
+    // Also return the token so browsers that
+    // don't send the cross-origin cookie can
+    // use Authorization: Bearer <token>
     return res.json({
       success: true,
       message: "Login successful",
+      token,
       user: {
         id: user._id,
         name: user.name,
