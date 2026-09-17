@@ -39,7 +39,7 @@ const BecomeSeller = () => {
 
     try {
       const response = await fetch(
-        `${API_URL}/api/sellers/become`
+        `${API_URL}/api/sellers/become`,
         {
           method: "POST",
           headers: {

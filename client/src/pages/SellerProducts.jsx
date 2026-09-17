@@ -25,7 +25,7 @@ const SellerProducts = () => {
       setError("");
 
       const response = await fetch(
-        `${API_URL}/api/products/my-products`
+        `${API_URL}/api/products/my-products`,
         {
           method: "GET",
           credentials: "include",
@@ -64,7 +64,7 @@ const SellerProducts = () => {
       setError("");
 
       const response = await fetch(
-        `${API_URL}/api/products/${productId}`
+        `${API_URL}/api/products/${productId}`,
         {
           method: "DELETE",
           credentials: "include",
@@ -151,12 +151,12 @@ const SellerProducts = () => {
           </div>
 
           <Link
-  to="/seller/products/add"
-  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-gray-800"
->
-  <Plus size={19} className="text-white" />
-  <span className="text-white">Add Product</span>
-</Link>
+            to="/seller/products/add"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-gray-800"
+          >
+            <Plus size={19} className="text-white" />
+            <span className="text-white">Add Product</span>
+          </Link>
         </div>
 
         {/* Error */}
@@ -171,6 +171,7 @@ const SellerProducts = () => {
               <p className="font-semibold">
                 Something went wrong
               </p>
+
               <p className="mt-1">{error}</p>
             </div>
           </div>
