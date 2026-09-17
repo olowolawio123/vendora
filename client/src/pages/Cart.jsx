@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   ArrowRight,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -27,10 +28,7 @@ const Cart = () => {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_URL}/api/cart`, {
-        credentials: "include",
-      });
-
+      const response = await apiFetch("/api/cart");
       const data = await response.json();
 
       if (!response.ok) {
@@ -63,20 +61,15 @@ const Cart = () => {
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/cart/item/${productId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            quantity,
-          }),
-        }
-      );
-
+  const response = await apiFetch(`/api/cart/item/${productId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      quantity,
+    }),
+  });
       const data = await response.json();
 
       if (!response.ok) {
@@ -97,15 +90,10 @@ const Cart = () => {
     setRemovingProduct(productId);
     setError("");
 
-    try {
-      const response = await fetch(
-        `${API_URL}/api/cart/item/${productId}`,
-        {
-          method: "DELETE",
-          credentials: "include",
-        }
-      );
-
+   try {
+  const response = await apiFetch(`/api/cart/item/${productId}`, {
+    method: "DELETE",
+  });
       const data = await response.json();
 
       if (!response.ok) {

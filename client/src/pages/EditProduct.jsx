@@ -8,6 +8,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -41,12 +42,7 @@ const EditProduct = () => {
         setLoading(true);
         setError("");
 
-        const response = await fetch(
-          `${API_URL}/api/products/my-products`,
-          {
-            credentials: "include",
-          }
-        );
+        const response = await apiFetch("/api/products/my-products");
 
         const data = await response.json();
 
@@ -154,14 +150,10 @@ const EditProduct = () => {
 
         imageFormData.append("image", file);
 
-        const response = await fetch(
-          `${API_URL}/api/products/upload-image`,
-          {
-            method: "POST",
-            credentials: "include",
-            body: imageFormData,
-          }
-        );
+        const response = await apiFetch("/api/products/upload-image", {
+  method: "POST",
+  body: imageFormData,
+});
 
         const data = await response.json();
 
@@ -199,25 +191,21 @@ const EditProduct = () => {
         ];
       }
 
-      const response = await fetch(
-        `${API_URL}/api/products/${productId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            title: formData.title.trim(),
-            description: formData.description.trim(),
-            price: Number(formData.price),
-            category: formData.category,
-            stock: Number(formData.stock),
-            status: formData.status,
-            images: finalImages,
-          }),
-        }
-      );
+     const response = await apiFetch(`/api/products/${productId}`, {
+  method: "PATCH",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    title: formData.title.trim(),
+    description: formData.description.trim(),
+    price: Number(formData.price),
+    category: formData.category,
+    stock: Number(formData.stock),
+    status: formData.status,
+    images: finalImages,
+  }),
+});
 
       const data = await response.json();
 

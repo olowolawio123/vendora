@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Boxes,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -24,14 +25,9 @@ const SellerProducts = () => {
       setLoading(true);
       setError("");
 
-      const response = await fetch(
-        `${API_URL}/api/products/my-products`,
-        {
-          method: "GET",
-          credentials: "include",
-        }
-      );
-
+      const response = await apiFetch("/api/products/my-products", {
+  method: "GET",
+});
       const data = await response.json();
 
       if (!response.ok) {
@@ -63,14 +59,9 @@ const SellerProducts = () => {
       setDeletingId(productId);
       setError("");
 
-      const response = await fetch(
-        `${API_URL}/api/products/${productId}`,
-        {
-          method: "DELETE",
-          credentials: "include",
-        }
-      );
-
+     const response = await apiFetch(`/api/products/${productId}`, {
+  method: "DELETE",
+});
       const data = await response.json();
 
       if (!response.ok) {

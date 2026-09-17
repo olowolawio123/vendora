@@ -7,6 +7,7 @@ import {
   CreditCard,
   LoaderCircle,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -23,12 +24,7 @@ const OrderDetails = () => {
         setLoading(true);
         setError("");
 
-        const response = await fetch(
-          `${API_URL}/api/orders/${orderId}`,
-          {
-            credentials: "include",
-          }
-        );
+        const response = await apiFetch(`/api/orders/${orderId}`);
 
         const data = await response.json();
 

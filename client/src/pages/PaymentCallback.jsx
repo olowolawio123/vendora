@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   XCircle,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -38,14 +39,9 @@ const PaymentCallback = () => {
           We therefore first retrieve the order associated
           with this reference through our backend.
         */
-        const response = await fetch(
-          `${API_URL}/api/orders/verify-reference/${encodeURIComponent(
-            reference
-          )}`,
-          {
-            credentials: "include",
-          }
-        );
+       const response = await apiFetch(
+  `/api/orders/verify-reference/${encodeURIComponent(reference)}`
+);
 
         const data = await response.json();
 
@@ -58,19 +54,18 @@ const PaymentCallback = () => {
 
         const orderId = data.orderId;
 
-        const verifyResponse = await fetch(
-          `${API_URL}/api/orders/${orderId}/verify-payment`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            credentials: "include",
-            body: JSON.stringify({
-              reference,
-            }),
-          }
-        );
+        const verifyResponse = await apiFetch(
+  `/api/orders/${orderId}/verify-payment`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      reference,
+    }),
+  }
+);
 
         const verifyData =
           await verifyResponse.json();

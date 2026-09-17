@@ -8,6 +8,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -95,14 +96,10 @@ const AddProduct = () => {
 
         imageFormData.append("image", file);
 
-        const response = await fetch(
-          `${API_URL}/api/products/upload-image`,
-          {
-            method: "POST",
-            credentials: "include",
-            body: imageFormData,
-          }
-        );
+       const response = await apiFetch("/api/products/upload-image", {
+  method: "POST",
+  body: imageFormData,
+});
 
         const data = await response.json();
 
@@ -137,12 +134,11 @@ const AddProduct = () => {
     try {
       const imageUrls = await uploadImages();
 
-      const response = await fetch(`${API_URL}/api/products`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
+      const response = await apiFetch("/api/products", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
         body: JSON.stringify({
           title: formData.title.trim(),
           description: formData.description.trim(),

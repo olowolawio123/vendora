@@ -9,6 +9,7 @@ import {
   Package,
   ShieldCheck,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 import { useAuth } from "../context/AuthContext";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -45,9 +46,7 @@ const [processingPayment, setProcessingPayment] = useState(false);
         setLoading(true);
         setError("");
 
-        const response = await fetch(`${API_URL}/api/cart`, {
-          credentials: "include",
-        });
+        const response = await apiFetch("/api/cart");
 
         const data = await response.json();
 
@@ -118,14 +117,13 @@ const [processingPayment, setProcessingPayment] = useState(false);
       STEP 1:
       Create the pending order.
     */
-    const orderResponse = await fetch(`${API_URL}/api/orders`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify(address),
-    });
+    const orderResponse = await apiFetch("/api/orders", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(address),
+});
 
     const orderData = await orderResponse.json();
 
@@ -141,13 +139,9 @@ const [processingPayment, setProcessingPayment] = useState(false);
       STEP 2:
       Ask our backend to initialize Paystack.
     */
-    const paymentResponse = await fetch(
-      `${API_URL}/api/orders/${orderId}/pay`,
-      {
-        method: "POST",
-        credentials: "include",
-      }
-    );
+   const paymentResponse = await apiFetch(`/api/orders/${orderId}/pay`, {
+  method: "POST",
+});
 
     const paymentData = await paymentResponse.json();
 

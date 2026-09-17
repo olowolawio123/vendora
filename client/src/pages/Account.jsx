@@ -1,3 +1,4 @@
+import apiFetch from "../services/apiFetch";
 import { useEffect, useState } from "react";
 import {
   Package,
@@ -35,12 +36,7 @@ const Account = () => {
         setLoadingOrders(true);
         setOrdersError("");
 
-        const response = await fetch(
-          `${API_URL}/api/orders/my-orders`,
-          {
-            credentials: "include",
-          }
-        );
+        const response = await apiFetch("/api/orders/my-orders");
 
         const data = await response.json();
 
