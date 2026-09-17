@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "http://localhost:5000";
 
 const ProductDetails = () => {
   const { productId } = useParams();
@@ -110,7 +110,7 @@ const ProductDetails = () => {
           quantity === 1 ? "item" : "items"
         } added to your cart.`
       );
-
+      
     window.dispatchEvent(new Event("cartUpdated"));
 
     } catch (error) {

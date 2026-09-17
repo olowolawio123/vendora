@@ -9,8 +9,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL;
-
 const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +31,7 @@ const Products = () => {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/products`
+          "http://localhost:5000/api/products"
         );
 
         const data = await response.json();

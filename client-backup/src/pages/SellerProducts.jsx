@@ -11,8 +11,6 @@ import {
   Boxes,
 } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL;
-
 const SellerProducts = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +23,7 @@ const SellerProducts = () => {
       setError("");
 
       const response = await fetch(
-        `${API_URL}/api/products/my-products`
+        "http://localhost:5000/api/products/my-products",
         {
           method: "GET",
           credentials: "include",
@@ -64,7 +62,7 @@ const SellerProducts = () => {
       setError("");
 
       const response = await fetch(
-        `${API_URL}/api/products/${productId}`
+        `http://localhost:5000/api/products/${productId}`,
         {
           method: "DELETE",
           credentials: "include",

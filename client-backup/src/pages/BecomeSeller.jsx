@@ -9,8 +9,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL;
-
 const BecomeSeller = () => {
   const [formData, setFormData] = useState({
     storeName: "",
@@ -39,7 +37,7 @@ const BecomeSeller = () => {
 
     try {
       const response = await fetch(
-        `${API_URL}/api/sellers/become`
+        "http://localhost:5000/api/sellers/become",
         {
           method: "POST",
           headers: {

@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   ImagePlus,
@@ -9,9 +9,10 @@ import {
   Upload,
 } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "http://localhost:5000";
 
-const AddProduct = () => {
+const EditProduct = () => {
+  const { productId } = useParams();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
@@ -24,11 +25,66 @@ const AddProduct = () => {
     status: "draft",
   });
 
-  const [selectedImages, setSelectedImages] = useState([]);
+  const [existingImages, setExistingImages] = useState([]);
+  const [newImages, setNewImages] = useState([]);
+
+  const [loading, setLoading] = useState(true);
   const [uploadingImages, setUploadingImages] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const loadProduct = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await fetch(
+          `${API_URL}/api/products/my-products`,
+          {
+            credentials: "include",
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.message || "Unable to load product"
+          );
+        }
+
+        const product = data.products.find(
+          (item) => item._id === productId
+        );
+
+        if (!product) {
+          throw new Error("Product not found");
+        }
+
+        setFormData({
+          title: product.title || "",
+          description: product.description || "",
+          price: product.price ?? "",
+          category: product.category || "",
+          stock: product.stock ?? "",
+          status: product.status || "draft",
+        });
+
+        setExistingImages(
+          Array.isArray(product.images) ? product.images : []
+        );
+      } catch (error) {
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProduct();
+  }, [productId]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -65,32 +121,35 @@ const AddProduct = () => {
       validFiles.push(file);
     }
 
-    if (validFiles.length === 0) {
-      event.target.value = "";
-      return;
+    if (validFiles.length > 0) {
+      setNewImages((previous) => [
+        ...previous,
+        ...validFiles,
+      ]);
     }
-
-    setSelectedImages((previous) => [
-      ...previous,
-      ...validFiles,
-    ]);
 
     event.target.value = "";
   };
 
-  const removeImage = (indexToRemove) => {
-    setSelectedImages((previous) =>
+  const removeExistingImage = (indexToRemove) => {
+    setExistingImages((previous) =>
       previous.filter((_, index) => index !== indexToRemove)
     );
   };
 
-  const uploadImages = async () => {
+  const removeNewImage = (indexToRemove) => {
+    setNewImages((previous) =>
+      previous.filter((_, index) => index !== indexToRemove)
+    );
+  };
+
+  const uploadNewImages = async () => {
     const uploadedUrls = [];
 
     setUploadingImages(true);
 
     try {
-      for (const file of selectedImages) {
+      for (const file of newImages) {
         const imageFormData = new FormData();
 
         imageFormData.append("image", file);
@@ -126,54 +185,49 @@ const AddProduct = () => {
 
     setError("");
     setMessage("");
-
-    if (selectedImages.length === 0) {
-      setError("Please add at least one product image.");
-      return;
-    }
-
-    setLoading(true);
+    setSaving(true);
 
     try {
-      const imageUrls = await uploadImages();
+      let finalImages = [...existingImages];
 
-      const response = await fetch(`${API_URL}/api/products`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          title: formData.title.trim(),
-          description: formData.description.trim(),
-          price: Number(formData.price),
-          category: formData.category,
-          stock: Number(formData.stock),
-          status: formData.status,
-          images: imageUrls,
-        }),
-      });
+      if (newImages.length > 0) {
+        const uploadedUrls = await uploadNewImages();
+
+        finalImages = [
+          ...finalImages,
+          ...uploadedUrls,
+        ];
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/products/${productId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            title: formData.title.trim(),
+            description: formData.description.trim(),
+            price: Number(formData.price),
+            category: formData.category,
+            stock: Number(formData.stock),
+            status: formData.status,
+            images: finalImages,
+          }),
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Unable to create product"
+          data.message || "Unable to update product"
         );
       }
 
-      setMessage("Product created successfully.");
-
-      setFormData({
-        title: "",
-        description: "",
-        price: "",
-        category: "",
-        stock: "",
-        status: "draft",
-      });
-
-      setSelectedImages([]);
+      setMessage("Product updated successfully.");
 
       setTimeout(() => {
         navigate("/seller/products");
@@ -181,11 +235,57 @@ const AddProduct = () => {
     } catch (error) {
       setError(error.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const isSubmitting = loading || uploadingImages;
+  const isSubmitting = saving || uploadingImages;
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+          <div className="h-5 w-32 animate-pulse rounded bg-gray-200" />
+
+          <div className="mt-8 space-y-5">
+            <div className="h-9 w-56 animate-pulse rounded-lg bg-gray-200" />
+            <div className="h-5 w-80 animate-pulse rounded bg-gray-200" />
+
+            <div className="mt-8 h-96 animate-pulse rounded-2xl bg-gray-200" />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error && !formData.title) {
+    return (
+      <main className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-2xl px-4 py-20 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50">
+            <Package size={28} className="text-red-600" />
+          </div>
+
+          <h1 className="mt-5 text-2xl font-bold text-gray-950">
+            Unable to load product
+          </h1>
+
+          <p className="mt-2 text-sm text-gray-500">
+            {error}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => navigate("/seller/products")}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-gray-800"
+          >
+            <ArrowLeft size={17} />
+            Back to Products
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -205,12 +305,12 @@ const AddProduct = () => {
           </p>
 
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-gray-950">
-            Add Product
+            Edit Product
           </h1>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
-            Add your product information, images, pricing and stock
-            details to your Vendora store.
+            Update your product information, images, pricing and
+            stock details.
           </p>
         </div>
 
@@ -224,32 +324,94 @@ const AddProduct = () => {
                   </h2>
 
                   <p className="mt-1 text-sm text-gray-500">
-                    Add clear images that show buyers what you're
-                    selling.
+                    Manage the images buyers see on your product
+                    page.
                   </p>
                 </div>
 
+                {(existingImages.length > 0 ||
+                  newImages.length > 0) && (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                    {existingImages.map((image, index) => (
+                      <div
+                        key={`${image}-${index}`}
+                        className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100"
+                      >
+                        <img
+                          src={image}
+                          alt={`${formData.title} ${index + 1}`}
+                          className="aspect-square w-full object-cover"
+                        />
+
+                        {index === 0 && (
+                          <span className="absolute left-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-gray-800 shadow-sm">
+                            Main image
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeExistingImage(index)
+                          }
+                          disabled={isSubmitting}
+                          className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-950/90 text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Remove image ${index + 1}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {newImages.map((file, index) => (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100"
+                      >
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt={`New product preview ${index + 1}`}
+                          className="aspect-square w-full object-cover"
+                        />
+
+                        <span className="absolute left-2 top-2 rounded-full bg-gray-950 px-2.5 py-1 text-[10px] font-bold text-white">
+                          New
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => removeNewImage(index)}
+                          disabled={isSubmitting}
+                          className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-950/90 text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Remove new image ${index + 1}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="cursor-pointer rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center transition hover:border-gray-400 hover:bg-gray-100"
+                  className="mt-5 cursor-pointer rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-7 text-center transition hover:border-gray-400 hover:bg-gray-100"
                 >
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm">
                     <ImagePlus
-                      size={26}
+                      size={23}
                       className="text-gray-600"
                     />
                   </div>
 
-                  <h3 className="mt-4 text-sm font-semibold text-gray-900">
-                    Add product images
+                  <h3 className="mt-3 text-sm font-semibold text-gray-900">
+                    Add more images
                   </h3>
 
-                  <p className="mt-1 text-xs leading-5 text-gray-500">
-                    JPG, PNG, WEBP or other image formats up to 5 MB
-                    each
+                  <p className="mt-1 text-xs text-gray-500">
+                    Images must be 5 MB or smaller
                   </p>
 
-                  <span className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white">
+                  <span className="mt-3 inline-flex items-center gap-2 rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white">
                     <Upload size={16} />
                     Choose Images
                   </span>
@@ -264,59 +426,14 @@ const AddProduct = () => {
                   />
                 </div>
 
-                {selectedImages.length > 0 && (
-                  <div className="mt-6">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-gray-900">
-                        Selected Images
-                      </p>
-
-                      <p className="text-xs text-gray-500">
-                        {selectedImages.length}{" "}
-                        {selectedImages.length === 1
-                          ? "image"
-                          : "images"}
-                      </p>
+                {existingImages.length === 0 &&
+                  newImages.length === 0 && (
+                    <div className="mt-4 rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 text-xs leading-5 text-yellow-800">
+                      This product currently has no images. Add at
+                      least one image to make the listing more
+                      useful to buyers.
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                      {selectedImages.map((file, index) => (
-                        <div
-                          key={`${file.name}-${index}`}
-                          className="group relative overflow-hidden rounded-xl border border-gray-200 bg-gray-100"
-                        >
-                          <img
-                            src={URL.createObjectURL(file)}
-                            alt={`Product preview ${index + 1}`}
-                            className="aspect-square w-full object-cover"
-                          />
-
-                          {index === 0 && (
-                            <span className="absolute left-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-gray-800 shadow-sm">
-                              Main image
-                            </span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => removeImage(index)}
-                            disabled={isSubmitting}
-                            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-950/90 text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-                            aria-label={`Remove image ${index + 1}`}
-                          >
-                            <Trash2 size={15} />
-                          </button>
-
-                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 pb-2 pt-6">
-                            <p className="truncate text-[10px] text-white">
-                              {file.name}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
               </section>
 
               <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -326,8 +443,7 @@ const AddProduct = () => {
                   </h2>
 
                   <p className="mt-1 text-sm text-gray-500">
-                    Give buyers clear and useful information about
-                    your product.
+                    Keep your product details accurate and clear.
                   </p>
                 </div>
 
@@ -346,10 +462,9 @@ const AddProduct = () => {
                       type="text"
                       value={formData.title}
                       onChange={handleChange}
-                      placeholder="e.g. Nike Air Max Sneakers"
                       required
                       disabled={isSubmitting}
-                      className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
+                      className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
                     />
                   </div>
 
@@ -366,11 +481,10 @@ const AddProduct = () => {
                       name="description"
                       value={formData.description}
                       onChange={handleChange}
-                      placeholder="Describe the product, its condition, features and anything buyers should know."
                       rows={6}
                       required
                       disabled={isSubmitting}
-                      className="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
+                      className="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm leading-6 text-gray-900 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
                     />
                   </div>
                 </div>
@@ -388,6 +502,7 @@ const AddProduct = () => {
                     <h2 className="text-base font-bold text-gray-950">
                       Pricing & Stock
                     </h2>
+
                     <p className="text-xs text-gray-500">
                       Manage availability
                     </p>
@@ -416,10 +531,9 @@ const AddProduct = () => {
                         step="0.01"
                         value={formData.price}
                         onChange={handleChange}
-                        placeholder="0.00"
                         required
                         disabled={isSubmitting}
-                        className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
+                        className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-4 text-sm text-gray-900 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
                       />
                     </div>
                   </div>
@@ -440,10 +554,9 @@ const AddProduct = () => {
                       step="1"
                       value={formData.stock}
                       onChange={handleChange}
-                      placeholder="e.g. 10"
                       required
                       disabled={isSubmitting}
-                      className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
+                      className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-900 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:bg-gray-50"
                     />
                   </div>
                 </div>
@@ -513,12 +626,13 @@ const AddProduct = () => {
 
               <div className="rounded-2xl border border-gray-200 bg-gray-950 p-5 text-white">
                 <h3 className="text-sm font-semibold">
-                  Product publishing
+                  Listing visibility
                 </h3>
 
                 <p className="mt-2 text-xs leading-5 text-gray-300">
-                  Draft products remain hidden from buyers. Choose
-                  Active when you're ready to publish the product.
+                  Active products are visible to buyers on the
+                  marketplace. Draft and inactive products remain
+                  unavailable to buyers.
                 </p>
               </div>
             </div>
@@ -557,15 +671,14 @@ const AddProduct = () => {
                     size={17}
                     className="animate-spin"
                   />
-
                   {uploadingImages
                     ? "Uploading images..."
-                    : "Creating product..."}
+                    : "Saving changes..."}
                 </>
               ) : (
                 <>
                   <Package size={17} />
-                  Create Product
+                  Save Changes
                 </>
               )}
             </button>
@@ -576,4 +689,4 @@ const AddProduct = () => {
   );
 };
 
-export default AddProduct;
+export default EditProduct;
