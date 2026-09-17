@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+
 import {
   getCurrentUser,
   loginUser,
@@ -37,14 +43,29 @@ export const AuthProvider = ({ children }) => {
   // Login
   const login = async (credentials) => {
     const data = await loginUser(credentials);
+
+    // Save JWT fallback for browsers that don't
+    // send the authentication cookie.
+    if (data.token) {
+      localStorage.setItem(
+        "vendora_token",
+        data.token
+      );
+    }
+
     setUser(data.user);
+
     return data;
   };
 
   // Logout
   const logout = async () => {
-    await logoutUser();
-    setUser(null);
+    try {
+      await logoutUser();
+    } finally {
+      localStorage.removeItem("vendora_token");
+      setUser(null);
+    }
   };
 
   const value = {
