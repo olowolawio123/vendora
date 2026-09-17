@@ -2,7 +2,22 @@ const jwt = require("jsonwebtoken");
 
 const protect = (req, res, next) => {
   try {
-    const token = req.cookies.token;
+    // First try the secure HttpOnly cookie
+    let token = req.cookies.token;
+
+    // Fallback: allow Authorization: Bearer <token>
+    // This helps browsers where the cross-origin cookie
+    // is not available.
+    if (!token) {
+      const authHeader = req.headers.authorization;
+
+      if (
+        authHeader &&
+        authHeader.startsWith("Bearer ")
+      ) {
+        token = authHeader.split(" ")[1];
+      }
+    }
 
     if (!token) {
       return res.status(401).json({
@@ -11,7 +26,10 @@ const protect = (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
 
     req.user = decoded;
 
