@@ -13,6 +13,9 @@ const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("FRONTEND_URL:", process.env.FRONTEND_URL);
+
 // Middleware
 const allowedOrigin =
   process.env.FRONTEND_URL || "http://localhost:5173";
