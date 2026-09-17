@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Package,
@@ -9,36 +10,134 @@ import {
   Store,
   Settings,
 } from "lucide-react";
+import { toast } from "react-toastify";
+
 import { useAuth } from "../context/AuthContext";
+import apiFetch from "../services/apiFetch";
 
 const SellerDashboard = () => {
   const { user } = useAuth();
 
-  const stats = [
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    products: 0,
+    orders: 0,
+    sales: 0,
+    rating: 0,
+  });
+
+  const [recentOrders, setRecentOrders] = useState([]);
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        setLoading(true);
+
+        const [productsResponse, dashboardResponse] =
+          await Promise.all([
+            apiFetch("/api/products/my-products", {
+              method: "GET",
+            }),
+
+            apiFetch("/api/orders/seller-dashboard", {
+              method: "GET",
+            }),
+          ]);
+
+        const productsData = await productsResponse.json();
+        const dashboardData = await dashboardResponse.json();
+
+        if (!productsResponse.ok) {
+          throw new Error(
+            productsData.message ||
+              "Unable to load products"
+          );
+        }
+
+        if (!dashboardResponse.ok) {
+          throw new Error(
+            dashboardData.message ||
+              "Unable to load dashboard"
+          );
+        }
+
+        setStats({
+  products: productsData.count || 0,
+  orders: dashboardData.stats?.orders || 0,
+  sales: dashboardData.stats?.sales || 0,
+  rating: dashboardData.stats?.rating || 0,
+});
+        setRecentOrders(
+          dashboardData.recentOrders || []
+        );
+      } catch (error) {
+        console.error(
+          "Seller dashboard error:",
+          error
+        );
+
+        toast.error(
+          error.message ||
+            "Unable to load seller dashboard"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboard();
+  }, []);
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+      maximumFractionDigits: 0,
+    }).format(amount || 0);
+  };
+
+  const formatDate = (date) => {
+    if (!date) return "—";
+
+    return new Date(date).toLocaleDateString(
+      "en-NG",
+      {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }
+    );
+  };
+
+  const statCards = [
     {
       title: "Products",
-      value: "0",
+      value: loading ? "..." : stats.products,
       description: "Products in your store",
       icon: Package,
       iconStyle: "bg-blue-50 text-blue-600",
     },
     {
       title: "Orders",
-      value: "0",
-      description: "Orders received",
+      value: loading ? "..." : stats.orders,
+      description: "Orders containing your products",
       icon: ShoppingBag,
       iconStyle: "bg-purple-50 text-purple-600",
     },
     {
       title: "Sales",
-      value: "₦0",
-      description: "Total sales",
+      value: loading
+        ? "..."
+        : formatCurrency(stats.sales),
+      description: "Paid sales from your products",
       icon: Wallet,
       iconStyle: "bg-green-50 text-green-600",
     },
     {
       title: "Rating",
-      value: "0.0",
+      value: loading
+        ? "..."
+        : stats.rating.toFixed(1),
       description: "Average store rating",
       icon: Star,
       iconStyle: "bg-yellow-50 text-yellow-600",
@@ -48,6 +147,7 @@ const SellerDashboard = () => {
   return (
     <div className="min-h-[calc(100vh-80px)] bg-gray-50">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+
         {/* Header */}
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -60,18 +160,18 @@ const SellerDashboard = () => {
             </h1>
 
             <p className="mt-2 text-sm leading-6 text-gray-600 sm:text-base">
-              Manage your Vendora store, products and sales from
-              one place.
+              Manage your Vendora store, products and
+              sales from one place.
             </p>
           </div>
 
           <Link
-            to="/seller/products/add"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-gray-800"
-          >
-            <Plus size={18} className="text-white" />
-            <span className="text-white">Add Product</span>
-          </Link>
+              to="/seller/products/add"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white  transition hover:bg-gray-800"
+                                    >
+              <Plus size={18} />
+              Add Product
+        </Link>
         </div>
 
         {/* Store overview */}
@@ -89,8 +189,8 @@ const SellerDashboard = () => {
                 </h2>
 
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-300">
-                  Add products to your store and start reaching
-                  customers on Vendora.
+                  Add products to your store and start
+                  reaching customers on Vendora.
                 </p>
               </div>
 
@@ -107,7 +207,7 @@ const SellerDashboard = () => {
 
         {/* Statistics */}
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => {
+          {statCards.map((stat) => {
             const Icon = stat.icon;
 
             return (
@@ -139,6 +239,95 @@ const SellerDashboard = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* Recent Orders */}
+        <div className="mt-8 rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-gray-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">
+                Recent Orders
+              </h2>
+
+              <p className="mt-1 text-sm text-gray-500">
+                Recent orders containing your products.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled
+              className="text-sm font-semibold text-gray-400"
+            >
+              View All
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="px-6 py-10 text-center text-sm text-gray-500">
+              Loading recent orders...
+            </div>
+          ) : recentOrders.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <ShoppingBag
+                size={28}
+                className="mx-auto text-gray-300"
+              />
+
+              <p className="mt-3 text-sm font-medium text-gray-700">
+                No orders yet
+              </p>
+
+              <p className="mt-1 text-sm text-gray-500">
+                Orders containing your products will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {recentOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">
+                      Order #{String(order.id).slice(-8)}
+                    </p>
+
+                    <p className="mt-1 text-sm text-gray-500">
+                      {order.buyer?.name ||
+                        "Customer"}{" "}
+                      · {formatDate(order.createdAt)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-6 sm:justify-end">
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-gray-900">
+                        {formatCurrency(order.total)}
+                      </p>
+
+                      <p
+                        className={`mt-1 text-xs font-medium ${
+                          order.paymentStatus === "paid"
+                            ? "text-green-600"
+                            : "text-yellow-600"
+                        }`}
+                      >
+                        {order.paymentStatus === "paid"
+                          ? "Paid"
+                          : "Payment pending"}
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium capitalize text-gray-600">
+                      {order.orderStatus || "pending"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Quick actions */}
@@ -180,13 +369,13 @@ const SellerDashboard = () => {
               fulfilment workflow.
             </p>
 
-            <button
-              type="button"
-              disabled
-              className="mt-5 inline-flex cursor-not-allowed items-center gap-2 text-sm font-semibold text-gray-400"
+            <Link
+              to="/seller/orders"
+              className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-900 hover:underline"
             >
-              Orders coming soon
-            </button>
+              manage orders
+              <ArrowRight size={16} />
+            </Link>
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -233,10 +422,8 @@ const SellerDashboard = () => {
               to="/seller/products/add"
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
             >
-              <Plus size={18} className="text-white" />
-              <span className="text-white">
-                Add Your First Product
-              </span>
+              <Plus size={18} />
+              Add Your First Product
             </Link>
           </div>
         </div>

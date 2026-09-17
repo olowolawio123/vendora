@@ -27,6 +27,7 @@ import Checkout from "./pages/Checkout";
 import PaymentCallback from "./pages/PaymentCallback";
 import OrderDetails from "./pages/OrderDetails";
 import AdminDashboard from "./pages/AdminDashboard";
+import SellerOrders from "./pages/SellerOrders";
 
 function App() {
   return (
@@ -77,6 +78,15 @@ function App() {
     <ProtectedRoute>
       <PaymentCallback />
     </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/seller/orders"
+  element={
+    <RoleProtectedRoute allowedRoles={["seller"]}>
+      <SellerOrders />
+    </RoleProtectedRoute>
   }
 />
 

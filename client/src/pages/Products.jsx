@@ -409,6 +409,7 @@ const Products = () => {
   <ArrowRight size={16} className="text-white" />
 </Link>
                 </div>
+                
               </article>
             ))}
           </div>
