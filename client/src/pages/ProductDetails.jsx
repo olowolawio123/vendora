@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   CheckCircle,
 } from "lucide-react";
+import apiFetch from "../services/apiFetch";
 import { useAuth } from "../context/AuthContext";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -85,18 +86,16 @@ const ProductDetails = () => {
     setAddingToCart(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/cart/add`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          productId,
-          quantity,
-        }),
-      });
-
+      const response = await apiFetch("/api/cart/add", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    productId,
+    quantity,
+  }),
+});
       const data = await response.json();
 
       if (!response.ok) {
