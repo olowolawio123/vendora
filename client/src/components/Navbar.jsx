@@ -791,12 +791,15 @@ const Navbar = () => {
               }
               aria-label="Shopping cart"
               title="Shopping cart"
-              className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+              className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
             >
-              <ShoppingCart size={21} />
+              <ShoppingCart
+                size={21}
+                strokeWidth={1.9}
+              />
 
               {cartCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white">
+                <span className="absolute right-0 top-0 flex h-4 min-w-4 translate-x-1/4 -translate-y-1/4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white">
                   {cartCount > 99
                     ? "99+"
                     : cartCount}
