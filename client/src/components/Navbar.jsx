@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import apiFetch from "../services/apiFetch";
 import {
   getUnreadNotificationCount,
   getNotifications,
@@ -39,40 +40,43 @@ const Navbar = () => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const loadCartCount = async () => {
-    if (!user) {
+ const loadCartCount = async () => {
+  if (!user) {
+    setCartCount(0);
+    return;
+  }
+
+  try {
+    const response = await apiFetch("/api/cart");
+
+    if (!response.ok) {
+      console.error(
+        "Cart count request failed:",
+        response.status
+      );
+
       setCartCount(0);
       return;
     }
 
-    try {
-      const response = await fetch(`${API_URL}/api/cart`, {
-        credentials: "include",
-      });
+    const data = await response.json();
 
-      if (!response.ok) {
-        setCartCount(0);
-        return;
-      }
+    const count = (data.cart?.items || []).reduce(
+      (total, item) =>
+        total + Number(item.quantity || 0),
+      0
+    );
 
-      const data = await response.json();
+    setCartCount(count);
+  } catch (error) {
+    console.error(
+      "Unable to load cart count:",
+      error
+    );
 
-      const count = (data.cart?.items || []).reduce(
-        (total, item) =>
-          total + Number(item.quantity || 0),
-        0
-      );
-
-      setCartCount(count);
-    } catch (error) {
-      console.error(
-        "Unable to load cart count:",
-        error
-      );
-
-      setCartCount(0);
-    }
-  };
+    setCartCount(0);
+  }
+};
 
   const loadNotificationCount = async () => {
     if (!user) {
