@@ -42,6 +42,19 @@ const orderItemSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+
+    // STATUS OF THIS SPECIFIC PRODUCT IN THE ORDER
+    status: {
+      type: String,
+      enum: [
+        "pending",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+      ],
+      default: "pending",
+    },
   },
   {
     _id: false,
@@ -126,7 +139,12 @@ const orderSchema = new mongoose.Schema(
 
     paymentStatus: {
       type: String,
-      enum: ["pending", "paid", "failed", "refunded"],
+      enum: [
+        "pending",
+        "paid",
+        "failed",
+        "refunded",
+      ],
       default: "pending",
     },
 
@@ -136,6 +154,7 @@ const orderSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // OVERALL ORDER STATUS
     orderStatus: {
       type: String,
       enum: [
@@ -153,4 +172,7 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("Order", orderSchema);
+module.exports = mongoose.model(
+  "Order",
+  orderSchema
+);

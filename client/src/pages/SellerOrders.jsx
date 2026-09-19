@@ -7,6 +7,9 @@ import {
   User,
   Calendar,
   Loader2,
+  Truck,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { toast } from "react-toastify";
 
@@ -60,49 +63,196 @@ const getStatusClass = (status) => {
   }
 };
 
+const formatStatus = (status) => {
+  if (!status) return "Pending";
+
+  return status.charAt(0).toUpperCase() + status.slice(1);
+};
+
+const getNextStatuses = (status) => {
+  switch (status) {
+    case "pending":
+      return ["processing", "cancelled"];
+
+    case "processing":
+      return ["shipped", "cancelled"];
+
+    case "shipped":
+      return ["delivered"];
+
+    case "delivered":
+      return [];
+
+    case "cancelled":
+      return [];
+
+    default:
+      return ["processing"];
+  }
+};
+
 const SellerOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [updatingItem, setUpdatingItem] = useState("");
 
-  useEffect(() => {
-    const loadSellerOrders = async () => {
-      try {
-        setLoading(true);
+  const loadSellerOrders = async () => {
+    try {
+      setLoading(true);
 
-        const response = await apiFetch(
-          "/api/orders/seller-orders",
-          {
-            method: "GET",
-          }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.message ||
-              "Unable to load seller orders"
-          );
+      const response = await apiFetch(
+        "/api/orders/seller-orders",
+        {
+          method: "GET",
         }
+      );
 
-        setOrders(data.orders || []);
-      } catch (error) {
-        console.error(
-          "Seller orders error:",
-          error
-        );
+      const data = await response.json();
 
-        toast.error(
-          error.message ||
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
             "Unable to load seller orders"
         );
-      } finally {
-        setLoading(false);
       }
-    };
 
+      setOrders(data.orders || []);
+    } catch (error) {
+      console.error(
+        "Seller orders error:",
+        error
+      );
+
+      toast.error(
+        error.message ||
+          "Unable to load seller orders"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadSellerOrders();
   }, []);
+
+  const updateItemStatus = async (
+    orderId,
+    productId,
+    status
+  ) => {
+    const updateKey = `${orderId}-${productId}`;
+
+    try {
+      // Find the current order from local state
+      const currentOrder = orders.find(
+        (order) => order.id === orderId
+      );
+
+      // Find the current product inside that order
+      const currentItem = currentOrder?.items?.find(
+        (item) =>
+          item.product?.toString() ===
+          productId?.toString()
+      );
+
+      const currentStatus =
+        currentItem?.status || "pending";
+
+      // Prevent duplicate status updates
+      if (currentStatus === status) {
+        toast.info(
+          `This product is already marked as ${formatStatus(
+            status
+          )}.`
+        );
+
+        return;
+      }
+
+      // Make sure this is a valid transition
+      const nextStatuses =
+        getNextStatuses(currentStatus);
+
+      if (!nextStatuses.includes(status)) {
+        toast.error(
+          `This product cannot move from ${formatStatus(
+            currentStatus
+          )} to ${formatStatus(status)}.`
+        );
+
+        return;
+      }
+
+      setUpdatingItem(updateKey);
+
+      const response = await apiFetch(
+        `/api/orders/seller-orders/${orderId}/items/${productId}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Unable to update order status"
+        );
+      }
+
+      // Update the local order state
+      setOrders((currentOrders) =>
+        currentOrders.map((order) => {
+          if (order.id !== orderId) {
+            return order;
+          }
+
+          return {
+            ...order,
+            items: order.items.map((item) => {
+              if (
+                item.product?.toString() !==
+                productId?.toString()
+              ) {
+                return item;
+              }
+
+              return {
+                ...item,
+                status,
+              };
+            }),
+          };
+        })
+      );
+
+      toast.success(
+        `Order status changed to ${formatStatus(
+          status
+        )}`
+      );
+    } catch (error) {
+      console.error(
+        "Update order status error:",
+        error
+      );
+
+      toast.error(
+        error.message ||
+          "Unable to update order status"
+      );
+    } finally {
+      setUpdatingItem("");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -123,7 +273,7 @@ const SellerOrders = () => {
             </h1>
 
             <p className="mt-1 text-gray-600">
-              View orders containing your products.
+              View and manage orders containing your products.
             </p>
           </div>
 
@@ -202,7 +352,9 @@ const SellerOrders = () => {
                         )}`}
                       >
                         Payment:{" "}
-                        {order.paymentStatus}
+                        {formatStatus(
+                          order.paymentStatus
+                        )}
                       </span>
 
                       <span
@@ -211,7 +363,9 @@ const SellerOrders = () => {
                         )}`}
                       >
                         Order:{" "}
-                        {order.orderStatus}
+                        {formatStatus(
+                          order.orderStatus
+                        )}
                       </span>
                     </div>
                   </div>
@@ -281,61 +435,181 @@ const SellerOrders = () => {
 
                   <div className="divide-y divide-gray-100">
                     {order.items?.map(
-                      (item, index) => (
-                        <div
-                          key={`${order.id}-${item.product}-${index}`}
-                          className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:px-6"
-                        >
-                          {/* Image */}
-                          <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
-                            {item.image ? (
-                              <img
-                                src={item.image}
-                                alt={item.title}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-gray-400">
-                                <Package
-                                  size={24}
-                                />
+                      (item, index) => {
+                        const itemStatus =
+                          item.status || "pending";
+
+                        const nextStatuses =
+                          getNextStatuses(
+                            itemStatus
+                          );
+
+                        const updateKey = `${order.id}-${item.product}`;
+
+                        const isUpdating =
+                          updatingItem ===
+                          updateKey;
+
+                        return (
+                          <div
+                            key={`${order.id}-${item.product}-${index}`}
+                            className="flex flex-col gap-5 px-5 py-5 sm:px-6"
+                          >
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                              {/* Image */}
+                              <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
+                                {item.image ? (
+                                  <img
+                                    src={item.image}
+                                    alt={item.title}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-gray-400">
+                                    <Package
+                                      size={24}
+                                    />
+                                  </div>
+                                )}
                               </div>
-                            )}
+
+                              {/* Product info */}
+                              <div className="min-w-0 flex-1">
+                                <h4 className="font-semibold text-gray-900">
+                                  {item.title}
+                                </h4>
+
+                                <p className="mt-1 text-sm text-gray-500">
+                                  Quantity:{" "}
+                                  {item.quantity}
+                                </p>
+
+                                <p className="mt-1 text-sm text-gray-500">
+                                  Unit price:{" "}
+                                  {formatCurrency(
+                                    item.price
+                                  )}
+                                </p>
+                              </div>
+
+                              {/* Subtotal */}
+                              <div className="sm:text-right">
+                                <p className="text-sm text-gray-500">
+                                  Subtotal
+                                </p>
+
+                                <p className="mt-1 font-bold text-gray-900">
+                                  {formatCurrency(
+                                    item.subtotal
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Product status management */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-semibold text-gray-900">
+                                      Product status
+                                    </span>
+
+                                    <span
+                                      className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
+                                        itemStatus
+                                      )}`}
+                                    >
+                                      {formatStatus(
+                                        itemStatus
+                                      )}
+                                    </span>
+                                  </div>
+
+                                  <p className="mt-1 text-xs text-gray-500">
+                                    Update the delivery status of this product.
+                                  </p>
+                                </div>
+
+                                {nextStatuses.length >
+                                0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {nextStatuses.map(
+                                      (nextStatus) => {
+                                        const isCancelled =
+                                          nextStatus ===
+                                          "cancelled";
+
+                                        return (
+                                          <button
+                                            key={
+                                              nextStatus
+                                            }
+                                            type="button"
+                                            disabled={
+                                              isUpdating
+                                            }
+                                            onClick={() =>
+                                              updateItemStatus(
+                                                order.id,
+                                                item.product,
+                                                nextStatus
+                                              )
+                                            }
+                                            className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                              isCancelled
+                                                ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                                                : "bg-gray-900 text-white hover:bg-gray-800"
+                                            }`}
+                                          >
+                                            {isUpdating ? (
+                                              <Loader2
+                                                size={
+                                                  16
+                                                }
+                                                className="animate-spin"
+                                              />
+                                            ) : isCancelled ? (
+                                              <XCircle
+                                                size={
+                                                  16
+                                                }
+                                              />
+                                            ) : nextStatus ===
+                                              "shipped" ? (
+                                              <Truck
+                                                size={
+                                                  16
+                                                }
+                                              />
+                                            ) : (
+                                              <CheckCircle
+                                                size={
+                                                  16
+                                                }
+                                              />
+                                            )}
+
+                                            {isUpdating
+                                              ? "Updating..."
+                                              : `Mark as ${formatStatus(
+                                                  nextStatus
+                                                )}`}
+                                          </button>
+                                        );
+                                      }
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-medium text-gray-500">
+                                    No further status updates available.
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-
-                          {/* Product info */}
-                          <div className="min-w-0 flex-1">
-                            <h4 className="font-semibold text-gray-900">
-                              {item.title}
-                            </h4>
-
-                            <p className="mt-1 text-sm text-gray-500">
-                              Quantity:{" "}
-                              {item.quantity}
-                            </p>
-
-                            <p className="mt-1 text-sm text-gray-500">
-                              Unit price:{" "}
-                              {formatCurrency(
-                                item.price
-                              )}
-                            </p>
-                          </div>
-
-                          {/* Subtotal */}
-                          <div className="sm:text-right">
-                            <p className="text-sm text-gray-500">
-                              Subtotal
-                            </p>
-
-                            <p className="mt-1 font-bold text-gray-900">
-                              {formatCurrency(
-                                item.subtotal
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      )
+                        );
+                      }
                     )}
                   </div>
                 </div>

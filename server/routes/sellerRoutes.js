@@ -1,6 +1,7 @@
 const express = require("express");
 const Seller = require("../models/Seller");
 const User = require("../models/User");
+const Product = require("../models/Product");
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
 
@@ -54,7 +55,6 @@ router.post("/become", protect, async (req, res) => {
   }
 });
 
-
 // =====================================================
 // GET MY SELLER PROFILE
 // =====================================================
@@ -86,6 +86,79 @@ router.get("/me", protect, async (req, res) => {
 });
 
 // =====================================================
+// UPDATE MY STORE SETTINGS
+// SELLER ONLY
+// =====================================================
+router.patch("/me", protect, async (req, res) => {
+  try {
+    const {
+      storeName,
+      description,
+      phone,
+      location,
+    } = req.body;
+
+    const seller = await Seller.findOne({
+      user: req.user.userId,
+    });
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: "Seller profile not found",
+      });
+    }
+
+    if (storeName !== undefined) {
+      const trimmedStoreName = storeName.trim();
+
+      if (!trimmedStoreName) {
+        return res.status(400).json({
+          success: false,
+          message: "Store name cannot be empty",
+        });
+      }
+
+      seller.storeName = trimmedStoreName;
+    }
+
+    if (description !== undefined) {
+      seller.description = description.trim();
+    }
+
+    if (phone !== undefined) {
+      seller.phone = phone.trim();
+    }
+
+    if (location !== undefined) {
+      seller.location = location.trim();
+    }
+
+    await seller.save();
+
+    const updatedSeller = await Seller.findById(
+      seller._id
+    ).populate("user", "name email role");
+
+    res.json({
+      success: true,
+      message: "Store settings updated successfully",
+      seller: updatedSeller,
+    });
+  } catch (error) {
+    console.error(
+      "Update seller store settings error:",
+      error.message
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to update store settings",
+    });
+  }
+});
+
+// =====================================================
 // GET ALL PENDING SELLER APPLICATIONS
 // ADMIN ONLY
 // =====================================================
@@ -95,7 +168,9 @@ router.get(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      const sellers = await Seller.find({ status: "pending" })
+      const sellers = await Seller.find({
+        status: "pending",
+      })
         .populate("user", "name email role")
         .sort({ createdAt: -1 });
 
@@ -105,11 +180,15 @@ router.get(
         sellers,
       });
     } catch (error) {
-      console.error("Get pending sellers error:", error.message);
+      console.error(
+        "Get pending sellers error:",
+        error.message
+      );
 
       res.status(500).json({
         success: false,
-        message: "Unable to load pending seller applications",
+        message:
+          "Unable to load pending seller applications",
       });
     }
   }
@@ -125,7 +204,9 @@ router.patch(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      const seller = await Seller.findById(req.params.sellerId);
+      const seller = await Seller.findById(
+        req.params.sellerId
+      );
 
       if (!seller) {
         return res.status(404).json({
@@ -142,6 +223,7 @@ router.patch(
       }
 
       seller.status = "approved";
+
       await seller.save();
 
       await User.findByIdAndUpdate(seller.user, {
@@ -154,7 +236,10 @@ router.patch(
         seller,
       });
     } catch (error) {
-      console.error("Approve seller error:", error.message);
+      console.error(
+        "Approve seller error:",
+        error.message
+      );
 
       res.status(500).json({
         success: false,
@@ -174,7 +259,9 @@ router.patch(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      const seller = await Seller.findById(req.params.sellerId);
+      const seller = await Seller.findById(
+        req.params.sellerId
+      );
 
       if (!seller) {
         return res.status(404).json({
@@ -184,6 +271,7 @@ router.patch(
       }
 
       seller.status = "suspended";
+
       await seller.save();
 
       await User.findByIdAndUpdate(seller.user, {
@@ -196,7 +284,10 @@ router.patch(
         seller,
       });
     } catch (error) {
-      console.error("Reject seller error:", error.message);
+      console.error(
+        "Reject seller error:",
+        error.message
+      );
 
       res.status(500).json({
         success: false,
@@ -205,5 +296,63 @@ router.patch(
     }
   }
 );
+
+// =====================================================
+// GET PUBLIC SELLER STORE
+// =====================================================
+router.get("/:sellerId", async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+
+    if (!sellerId) {
+      return res.status(400).json({
+        success: false,
+        message: "Seller ID is required",
+      });
+    }
+
+    const seller = await Seller.findOne({
+      _id: sellerId,
+      status: "approved",
+    }).populate("user", "name");
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: "Seller store not found",
+      });
+    }
+
+    const products = await Product.find({
+      seller: seller._id,
+      status: "active",
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      seller: {
+        id: seller._id,
+        storeName: seller.storeName,
+        description: seller.description || "",
+        location: seller.location || "",
+        rating: seller.rating || 0,
+        status: seller.status,
+        ownerName: seller.user?.name || "",
+        createdAt: seller.createdAt,
+      },
+      products,
+    });
+  } catch (error) {
+    console.error(
+      "Get public seller store error:",
+      error.message
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to load seller store",
+    });
+  }
+});
 
 module.exports = router;

@@ -87,15 +87,16 @@ const ProductDetails = () => {
 
     try {
       const response = await apiFetch("/api/cart/add", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    productId,
-    quantity,
-  }),
-});
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId,
+          quantity,
+        }),
+      });
+
       const data = await response.json();
 
       if (!response.ok) {
@@ -110,8 +111,7 @@ const ProductDetails = () => {
         } added to your cart.`
       );
 
-    window.dispatchEvent(new Event("cartUpdated"));
-
+      window.dispatchEvent(new Event("cartUpdated"));
     } catch (error) {
       setError(error.message);
     } finally {
@@ -460,9 +460,22 @@ const ProductDetails = () => {
                     Sold by
                   </p>
 
-                  <h2 className="mt-1 text-xl font-bold text-gray-950">
-                    {product.seller?.storeName || "Vendora Seller"}
-                  </h2>
+                  {product.seller?._id ? (
+                    <Link
+                      to={`/seller/${product.seller._id}`}
+                      className="mt-1 inline-flex items-center gap-2 text-xl font-bold text-gray-950 transition hover:text-gray-600"
+                    >
+                      {product.seller?.storeName ||
+                        "Vendora Seller"}
+
+                      <Store size={18} />
+                    </Link>
+                  ) : (
+                    <h2 className="mt-1 text-xl font-bold text-gray-950">
+                      {product.seller?.storeName ||
+                        "Vendora Seller"}
+                    </h2>
+                  )}
 
                   <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-gray-500">
                     <span className="flex items-center gap-1.5">
@@ -485,9 +498,8 @@ const ProductDetails = () => {
 
               <div className="mt-6 border-t border-gray-100 pt-5">
                 <p className="text-sm leading-6 text-gray-500">
-                  Seller information and store details will be
-                  expanded here as we build Vendora's seller
-                  profiles and verification system.
+                  Visit this seller's store to view their available
+                  products and store information.
                 </p>
               </div>
             </div>

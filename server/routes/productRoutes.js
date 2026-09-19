@@ -10,18 +10,173 @@ const router = express.Router();
 // =====================================================
 // GET ALL ACTIVE PRODUCTS
 // PUBLIC
+// SEARCH + CATEGORY + PRICE + STOCK + SORT + PAGINATION
 // =====================================================
 router.get("/", async (req, res) => {
   try {
-    const products = await Product.find({
+    const {
+      search,
+      category,
+      minPrice,
+      maxPrice,
+      inStock,
+      sort,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const filter = {
       status: "active",
-    })
+    };
+
+    // -----------------------------
+    // SEARCH
+    // -----------------------------
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+
+      filter.$or = [
+        {
+          title: {
+            $regex: searchTerm,
+            $options: "i",
+          },
+        },
+        {
+          description: {
+            $regex: searchTerm,
+            $options: "i",
+          },
+        },
+        {
+          category: {
+            $regex: searchTerm,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    // -----------------------------
+    // CATEGORY
+    // -----------------------------
+    if (category && category.trim()) {
+      filter.category = {
+        $regex: `^${category.trim()}$`,
+        $options: "i",
+      };
+    }
+
+    // -----------------------------
+    // PRICE RANGE
+    // -----------------------------
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      filter.price = {};
+
+      if (minPrice !== undefined && minPrice !== "") {
+        const minimum = Number(minPrice);
+
+        if (!Number.isNaN(minimum) && minimum >= 0) {
+          filter.price.$gte = minimum;
+        }
+      }
+
+      if (maxPrice !== undefined && maxPrice !== "") {
+        const maximum = Number(maxPrice);
+
+        if (!Number.isNaN(maximum) && maximum >= 0) {
+          filter.price.$lte = maximum;
+        }
+      }
+
+      if (Object.keys(filter.price).length === 0) {
+        delete filter.price;
+      }
+    }
+
+    // -----------------------------
+    // STOCK FILTER
+    // -----------------------------
+    if (inStock === "true") {
+      filter.stock = {
+        $gt: 0,
+      };
+    }
+
+    // -----------------------------
+    // PAGINATION
+    // -----------------------------
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const itemsPerPage = Math.min(
+      Math.max(Number(limit) || 20, 1),
+      100
+    );
+
+    const skip = (currentPage - 1) * itemsPerPage;
+
+    // -----------------------------
+    // SORT
+    // -----------------------------
+    let sortOption = {
+      createdAt: -1,
+    };
+
+    if (sort === "price-low") {
+      sortOption = {
+        price: 1,
+      };
+    }
+
+    if (sort === "price-high") {
+      sortOption = {
+        price: -1,
+      };
+    }
+
+    if (sort === "oldest") {
+      sortOption = {
+        createdAt: 1,
+      };
+    }
+
+    if (sort === "newest") {
+      sortOption = {
+        createdAt: -1,
+      };
+    }
+
+    if (sort === "rating") {
+      sortOption = {
+        rating: -1,
+        createdAt: -1,
+      };
+    }
+
+    // -----------------------------
+    // GET TOTAL COUNT
+    // -----------------------------
+    const totalProducts = await Product.countDocuments(filter);
+
+    // -----------------------------
+    // GET PRODUCTS
+    // -----------------------------
+    const products = await Product.find(filter)
       .populate("seller", "storeName location rating")
-      .sort({ createdAt: -1 });
+      .sort(sortOption)
+      .skip(skip)
+      .limit(itemsPerPage);
+
+    const totalPages = Math.ceil(
+      totalProducts / itemsPerPage
+    );
 
     res.json({
       success: true,
       count: products.length,
+      totalProducts,
+      page: currentPage,
+      limit: itemsPerPage,
+      totalPages,
       products,
     });
   } catch (error) {

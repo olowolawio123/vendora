@@ -19,6 +19,7 @@ const SellerDashboard = () => {
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
+
   const [stats, setStats] = useState({
     products: 0,
     orders: 0,
@@ -62,11 +63,12 @@ const SellerDashboard = () => {
         }
 
         setStats({
-  products: productsData.count || 0,
-  orders: dashboardData.stats?.orders || 0,
-  sales: dashboardData.stats?.sales || 0,
-  rating: dashboardData.stats?.rating || 0,
-});
+          products: productsData.count || 0,
+          orders: dashboardData.stats?.orders || 0,
+          sales: dashboardData.stats?.sales || 0,
+          rating: dashboardData.stats?.rating || 0,
+        });
+
         setRecentOrders(
           dashboardData.recentOrders || []
         );
@@ -97,7 +99,9 @@ const SellerDashboard = () => {
   };
 
   const formatDate = (date) => {
-    if (!date) return "—";
+    if (!date) {
+      return "—";
+    }
 
     return new Date(date).toLocaleDateString(
       "en-NG",
@@ -120,7 +124,8 @@ const SellerDashboard = () => {
     {
       title: "Orders",
       value: loading ? "..." : stats.orders,
-      description: "Orders containing your products",
+      description:
+        "Orders containing your products",
       icon: ShoppingBag,
       iconStyle: "bg-purple-50 text-purple-600",
     },
@@ -129,7 +134,8 @@ const SellerDashboard = () => {
       value: loading
         ? "..."
         : formatCurrency(stats.sales),
-      description: "Paid sales from your products",
+      description:
+        "Paid sales from your products",
       icon: Wallet,
       iconStyle: "bg-green-50 text-green-600",
     },
@@ -137,7 +143,7 @@ const SellerDashboard = () => {
       title: "Rating",
       value: loading
         ? "..."
-        : stats.rating.toFixed(1),
+        : Number(stats.rating || 0).toFixed(1),
       description: "Average store rating",
       icon: Star,
       iconStyle: "bg-yellow-50 text-yellow-600",
@@ -166,12 +172,12 @@ const SellerDashboard = () => {
           </div>
 
           <Link
-              to="/seller/products/add"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white  transition hover:bg-gray-800"
-                                    >
-              <Plus size={18} />
-              Add Product
-        </Link>
+            to="/seller/products/add"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-gray-800"
+          >
+            <Plus size={18} />
+            Add Product
+          </Link>
         </div>
 
         {/* Store overview */}
@@ -254,13 +260,13 @@ const SellerDashboard = () => {
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled
-              className="text-sm font-semibold text-gray-400"
+            <Link
+              to="/seller/orders"
+              className="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 hover:underline"
             >
               View All
-            </button>
+              <ArrowRight size={15} />
+            </Link>
           </div>
 
           {loading ? (
@@ -279,7 +285,8 @@ const SellerDashboard = () => {
               </p>
 
               <p className="mt-1 text-sm text-gray-500">
-                Orders containing your products will appear here.
+                Orders containing your products will
+                appear here.
               </p>
             </div>
           ) : (
@@ -291,7 +298,8 @@ const SellerDashboard = () => {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900">
-                      Order #{String(order.id).slice(-8)}
+                      Order #
+                      {String(order.id).slice(-8)}
                     </p>
 
                     <p className="mt-1 text-sm text-gray-500">
@@ -332,6 +340,8 @@ const SellerDashboard = () => {
 
         {/* Quick actions */}
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
+
+          {/* Manage Products */}
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-100 text-gray-700">
               <Package size={21} />
@@ -342,8 +352,8 @@ const SellerDashboard = () => {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-500">
-              Add new products, update your listings and manage
-              your available stock.
+              Add new products, update your listings and
+              manage your available stock.
             </p>
 
             <Link
@@ -355,6 +365,7 @@ const SellerDashboard = () => {
             </Link>
           </div>
 
+          {/* Manage Orders */}
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-100 text-gray-700">
               <ShoppingBag size={21} />
@@ -365,19 +376,20 @@ const SellerDashboard = () => {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-500">
-              Keep track of customer orders and manage your
-              fulfilment workflow.
+              Keep track of customer orders and manage
+              your fulfilment workflow.
             </p>
 
             <Link
               to="/seller/orders"
               className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-900 hover:underline"
             >
-              manage orders
+              Manage orders
               <ArrowRight size={16} />
             </Link>
           </div>
 
+          {/* Store Settings */}
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-100 text-gray-700">
               <Settings size={21} />
@@ -388,17 +400,17 @@ const SellerDashboard = () => {
             </h3>
 
             <p className="mt-2 text-sm leading-6 text-gray-500">
-              Update your store information and configure your
-              seller account.
+              Update your store information and configure
+              your seller account.
             </p>
 
-            <button
-              type="button"
-              disabled
-              className="mt-5 inline-flex cursor-not-allowed items-center gap-2 text-sm font-semibold text-gray-400"
+            <Link
+              to="/seller/settings"
+              className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-900 hover:underline"
             >
-              Settings coming soon
-            </button>
+              Open store settings
+              <ArrowRight size={16} />
+            </Link>
           </div>
         </div>
 
@@ -427,6 +439,7 @@ const SellerDashboard = () => {
             </Link>
           </div>
         </div>
+
       </div>
     </div>
   );

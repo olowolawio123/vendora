@@ -28,6 +28,10 @@ import PaymentCallback from "./pages/PaymentCallback";
 import OrderDetails from "./pages/OrderDetails";
 import AdminDashboard from "./pages/AdminDashboard";
 import SellerOrders from "./pages/SellerOrders";
+import SellerStore from "./pages/SellerStore";
+import Wishlist from "./pages/Wishlist";
+import Notifications from "./pages/Notifications";
+import SellerSettings from "./pages/SellerSettings";
 
 function App() {
   return (
@@ -61,6 +65,15 @@ function App() {
              }
             />
 
+            <Route
+  path="/wishlist"
+  element={
+    <ProtectedRoute>
+      <Wishlist />
+    </ProtectedRoute>
+  }
+/>
+
 
             <Route
   path="/checkout"
@@ -82,6 +95,25 @@ function App() {
 />
 
 <Route
+  path="/seller/settings"
+  element={
+    <ProtectedRoute>
+      <SellerSettings />
+    </ProtectedRoute>
+  }
+/>
+
+
+<Route
+  path="/notifications"
+  element={
+    <ProtectedRoute>
+      <Notifications />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
   path="/seller/orders"
   element={
     <RoleProtectedRoute allowedRoles={["seller"]}>
@@ -97,6 +129,13 @@ function App() {
       <AdminDashboard />
     </RoleProtectedRoute>
   }
+/>
+
+
+{/* PUBLIC SELLER STORE */}
+<Route
+  path="/seller/:sellerId"
+  element={<SellerStore />}
 />
 
         

@@ -8,6 +8,7 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const Seller = require("../models/Seller");
 const protect = require("../middleware/authMiddleware");
+const Notification = require("../models/Notification");
 
 const router = express.Router();
 
@@ -138,6 +139,14 @@ router.post("/", protect, async (req, res) => {
       paymentStatus: "pending",
       orderStatus: "pending",
     });
+
+    await Notification.create({
+  user: req.user.userId,
+  type: "order_placed",
+  title: "Order placed successfully",
+  message: `Your order ${order.orderNumber} has been placed successfully.`,
+  order: order._id,
+});
 
     res.status(201).json({
       success: true,
@@ -386,7 +395,216 @@ router.get(
 );
 
 
+/*
+  UPDATE SELLER ORDER ITEM STATUS
 
+  PATCH /api/orders/seller-orders/:orderId/items/:productId/status
+*/
+router.patch(
+  "/seller-orders/:orderId/items/:productId/status",
+  protect,
+  async (req, res) => {
+    try {
+      const { status } = req.body;
+
+      const allowedStatuses = [
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+      ];
+
+      if (!status || !allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order status",
+        });
+      }
+
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.productId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product ID",
+        });
+      }
+
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can update order status",
+        });
+      }
+
+      const order = await Order.findOne({
+        _id: req.params.orderId,
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      if (order.paymentStatus !== "paid") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Order must be paid before its status can be updated",
+        });
+      }
+
+      const orderItem = order.items.find(
+        (item) =>
+          item.product &&
+          item.product.toString() ===
+            req.params.productId &&
+          item.seller &&
+          item.seller.toString() ===
+            seller._id.toString()
+      );
+
+      if (!orderItem) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You are not authorized to update this product in the order",
+        });
+      }
+
+      const currentStatus =
+        orderItem.status || "pending";
+
+      const allowedTransitions = {
+        pending: [
+          "processing",
+          "cancelled",
+        ],
+
+        processing: [
+          "shipped",
+          "cancelled",
+        ],
+
+        shipped: [
+          "delivered",
+        ],
+
+        delivered: [],
+
+        cancelled: [],
+      };
+
+      if (
+        !allowedTransitions[
+          currentStatus
+        ]?.includes(status)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Order item cannot move from ${currentStatus} to ${status}`,
+        });
+      }
+
+      
+orderItem.status = status;
+
+await order.save();
+
+// Create buyer notification
+const notificationMessages = {
+  processing: {
+    title: "Order is being processed",
+    message: `Your order ${order.orderNumber} is now being processed by the seller.`,
+    type: "order_processing",
+  },
+
+  shipped: {
+    title: "Order shipped",
+    message: `Your order ${order.orderNumber} has been shipped by the seller.`,
+    type: "order_shipped",
+  },
+
+  delivered: {
+    title: "Order delivered",
+    message: `Your order ${order.orderNumber} has been marked as delivered by the seller.`,
+    type: "order_delivered",
+  },
+
+  cancelled: {
+    title: "Order cancelled",
+    message: `Your order ${order.orderNumber} has been cancelled by the seller.`,
+    type: "order_cancelled",
+  },
+};
+
+const notification = notificationMessages[status];
+
+if (notification) {
+  try {
+    await Notification.create({
+      user: order.buyer,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      order: order._id,
+    });
+  } catch (notificationError) {
+    console.error(
+      "Buyer notification creation error:",
+      notificationError
+    );
+  }
+}
+
+return res.json({
+  success: true,
+  message: "Order item status updated successfully",
+  order: {
+    id: order._id,
+    orderNumber: order.orderNumber,
+    productId: orderItem.product,
+    status: orderItem.status,
+  },
+});
+
+      
+    } catch (error) {
+      console.error(
+        "Update seller order item status error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to update order item status",
+      });
+    }
+  }
+);
 
 /*
   INITIALIZE PAYSTACK PAYMENT
