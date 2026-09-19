@@ -18,6 +18,21 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    emailVerificationCode: {
+      type: String,
+      default: "",
+    },
+
+    emailVerificationCodeExpires: {
+      type: Date,
+      default: null,
+    },
+
     phone: {
       type: String,
       unique: true,
@@ -28,6 +43,20 @@ const userSchema = new mongoose.Schema(
     phoneVerified: {
       type: Boolean,
       default: false,
+    },
+
+    location: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: "",
+    },
+
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
     },
 
     password: {
@@ -59,10 +88,26 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    passwordResetCode: {
+      type: String,
+      default: "",
+    },
+
+    passwordResetCodeExpires: {
+      type: Date,
+      default: null,
+    },
+
     role: {
       type: String,
       enum: ["buyer", "seller", "admin"],
       default: "buyer",
+    },
+
+    status: {
+      type: String,
+      enum: ["active", "suspended"],
+      default: "active",
     },
   },
   {
@@ -71,9 +116,11 @@ const userSchema = new mongoose.Schema(
 );
 
 console.log(
-  "USER MODEL RESET FIELDS:",
-  "passwordResetToken" in userSchema.paths,
-  "passwordResetExpires" in userSchema.paths
+  "USER MODEL EMAIL CODE FIELDS:",
+  "emailVerificationCode" in userSchema.paths,
+  "emailVerificationCodeExpires" in userSchema.paths,
+  "passwordResetCode" in userSchema.paths,
+  "passwordResetCodeExpires" in userSchema.paths
 );
 
 module.exports = mongoose.model("User", userSchema);

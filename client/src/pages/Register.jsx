@@ -72,7 +72,7 @@ const Register = () => {
     setMessage("");
 
     const name = formData.name.trim();
-    const email = formData.email.trim();
+    const email = formData.email.trim().toLowerCase();
     const phone = formData.phone.trim();
 
     if (name.length < 2) {
@@ -112,9 +112,24 @@ const Register = () => {
         password: formData.password,
       });
 
+      /*
+       * Registration now requires email verification.
+       * The backend sends a 6-digit verification code
+       * through Resend.
+       */
+      if (data.requiresEmailVerification) {
+        navigate(
+          `/verify-email?email=${encodeURIComponent(email)}`
+        );
+        return;
+      }
+
+      /*
+       * Fallback in case the backend returns a normal
+       * successful registration response.
+       */
       setMessage(
-        data.message ||
-          "Account created successfully."
+        data.message || "Account created successfully."
       );
 
       setFormData({
@@ -129,7 +144,9 @@ const Register = () => {
         navigate("/login");
       }, 1800);
     } catch (error) {
-      setError(error.message);
+      setError(
+        error.message || "Unable to create your account."
+      );
     } finally {
       setLoading(false);
     }

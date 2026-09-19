@@ -10,6 +10,7 @@ import "react-toastify/dist/ReactToastify.css";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import VerifyEmail from "./pages/VerifyEmail";
 import Account from "./pages/Account";
 import BecomeSeller from "./pages/BecomeSeller";
 import SellerDashboard from "./pages/SellerDashboard";
@@ -32,6 +33,11 @@ import SellerStore from "./pages/SellerStore";
 import Wishlist from "./pages/Wishlist";
 import Notifications from "./pages/Notifications";
 import SellerSettings from "./pages/SellerSettings";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import HelpCenter from "./pages/HelpCenter";
+import ContactSupport from "./pages/ContactSupport";
+import MySupportRequests from "./pages/MySupportRequests";
 
 function App() {
   return (
@@ -44,8 +50,42 @@ function App() {
             {/* LOGIN */}
             <Route path="/login" element={<Login />} />
 
+            {/* FORGOT PASSWORD */}
+            <Route
+              path="/forgot-password"
+              element={<ForgotPassword />}
+            />
+
             {/* REGISTER */}
             <Route path="/register" element={<Register />} />
+
+            {/* VERIFY EMAIL */}
+            <Route
+              path="/verify-email"
+              element={<VerifyEmail />}
+            />
+            {/* RESET PASSWORD */}
+<Route
+  path="/reset-password"
+  element={<ResetPassword />}
+/>
+
+
+{/* HELP CENTER */}
+<Route
+  path="/help-center"
+  element={<HelpCenter />}
+/>
+
+<Route
+  path="/contact-support"
+  element={<ContactSupport />}
+/>
+
+<Route
+  path="/my-support-requests"
+  element={<MySupportRequests />}
+/>
 
             {/* PRODUCTS */}
             <Route path="/products" element={<Products />} />
@@ -55,90 +95,92 @@ function App() {
               path="/product/:productId"
               element={<ProductDetails />}
             />
-           
+
+            {/* CART */}
             <Route
               path="/cart"
-               element={
-             <ProtectedRoute>
-              <Cart />
-               </ProtectedRoute>
-             }
+              element={
+                <ProtectedRoute>
+                  <Cart />
+                </ProtectedRoute>
+              }
             />
 
+            {/* WISHLIST */}
             <Route
-  path="/wishlist"
-  element={
-    <ProtectedRoute>
-      <Wishlist />
-    </ProtectedRoute>
-  }
-/>
+              path="/wishlist"
+              element={
+                <ProtectedRoute>
+                  <Wishlist />
+                </ProtectedRoute>
+              }
+            />
 
-
+            {/* CHECKOUT */}
             <Route
-  path="/checkout"
-  element={
-    <ProtectedRoute>
-      <Checkout />
-    </ProtectedRoute>
-  }
-/>
+              path="/checkout"
+              element={
+                <ProtectedRoute>
+                  <Checkout />
+                </ProtectedRoute>
+              }
+            />
 
+            {/* PAYMENT CALLBACK */}
+            <Route
+              path="/payment/callback"
+              element={
+                <ProtectedRoute>
+                  <PaymentCallback />
+                </ProtectedRoute>
+              }
+            />
 
-<Route
-  path="/payment/callback"
-  element={
-    <ProtectedRoute>
-      <PaymentCallback />
-    </ProtectedRoute>
-  }
-/>
+            {/* SELLER SETTINGS */}
+            <Route
+              path="/seller/settings"
+              element={
+                <ProtectedRoute>
+                  <SellerSettings />
+                </ProtectedRoute>
+              }
+            />
 
-<Route
-  path="/seller/settings"
-  element={
-    <ProtectedRoute>
-      <SellerSettings />
-    </ProtectedRoute>
-  }
-/>
+            {/* NOTIFICATIONS */}
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <Notifications />
+                </ProtectedRoute>
+              }
+            />
 
+            {/* SELLER ORDERS */}
+            <Route
+              path="/seller/orders"
+              element={
+                <RoleProtectedRoute allowedRoles={["seller"]}>
+                  <SellerOrders />
+                </RoleProtectedRoute>
+              }
+            />
 
-<Route
-  path="/notifications"
-  element={
-    <ProtectedRoute>
-      <Notifications />
-    </ProtectedRoute>
-  }
-/>
+            {/* ADMIN */}
+            <Route
+              path="/admin"
+              element={
+                <RoleProtectedRoute allowedRoles={["admin"]}>
+                  <AdminDashboard />
+                </RoleProtectedRoute>
+              }
+            />
 
-<Route
-  path="/seller/orders"
-  element={
-    <RoleProtectedRoute allowedRoles={["seller"]}>
-      <SellerOrders />
-    </RoleProtectedRoute>
-  }
-/>
-
-<Route
-  path="/admin"
-  element={
-    <RoleProtectedRoute allowedRoles={["admin"]}>
-      <AdminDashboard />
-    </RoleProtectedRoute>
-  }
-/>
-
-
-{/* PUBLIC SELLER STORE */}
-<Route
-  path="/seller/:sellerId"
-  element={<SellerStore />}
-/>
-
-        
+            {/* PUBLIC SELLER STORE */}
+            <Route
+              path="/seller/:sellerId"
+              element={<SellerStore />}
+            />
 
             {/* BUYER ACCOUNT */}
             <Route
@@ -150,14 +192,15 @@ function App() {
               }
             />
 
+            {/* ORDER DETAILS */}
             <Route
-  path="/account/orders/:orderId"
-  element={
-    <ProtectedRoute>
-      <OrderDetails />
-    </ProtectedRoute>
-  }
-/>
+              path="/account/orders/:orderId"
+              element={
+                <ProtectedRoute>
+                  <OrderDetails />
+                </ProtectedRoute>
+              }
+            />
 
             {/* BECOME A SELLER */}
             <Route

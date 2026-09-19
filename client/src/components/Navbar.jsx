@@ -13,6 +13,7 @@ import {
   Bell,
   CheckCheck,
   Trash2,
+  CircleHelp,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import apiFetch from "../services/apiFetch";
@@ -40,43 +41,43 @@ const Navbar = () => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
- const loadCartCount = async () => {
-  if (!user) {
-    setCartCount(0);
-    return;
-  }
-
-  try {
-    const response = await apiFetch("/api/cart");
-
-    if (!response.ok) {
-      console.error(
-        "Cart count request failed:",
-        response.status
-      );
-
+  const loadCartCount = async () => {
+    if (!user) {
       setCartCount(0);
       return;
     }
 
-    const data = await response.json();
+    try {
+      const response = await apiFetch("/api/cart");
 
-    const count = (data.cart?.items || []).reduce(
-      (total, item) =>
-        total + Number(item.quantity || 0),
-      0
-    );
+      if (!response.ok) {
+        console.error(
+          "Cart count request failed:",
+          response.status
+        );
 
-    setCartCount(count);
-  } catch (error) {
-    console.error(
-      "Unable to load cart count:",
-      error
-    );
+        setCartCount(0);
+        return;
+      }
 
-    setCartCount(0);
-  }
-};
+      const data = await response.json();
+
+      const count = (data.cart?.items || []).reduce(
+        (total, item) =>
+          total + Number(item.quantity || 0),
+        0
+      );
+
+      setCartCount(count);
+    } catch (error) {
+      console.error(
+        "Unable to load cart count:",
+        error
+      );
+
+      setCartCount(0);
+    }
+  };
 
   const loadNotificationCount = async () => {
     if (!user) {
@@ -393,6 +394,15 @@ const Navbar = () => {
               Products
             </Link>
 
+            {/* HELP CENTER */}
+            <Link
+              to="/help-center"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950"
+            >
+              <CircleHelp size={17} />
+              Help
+            </Link>
+
             <Link
               to="/become-a-seller"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950"
@@ -689,6 +699,16 @@ const Navbar = () => {
                       >
                         <Heart size={17} />
                         My Wishlist
+                      </Link>
+
+                      {/* MY SUPPORT REQUESTS */}
+                      <Link
+                        to="/my-support-requests"
+                        onClick={closeMenus}
+                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <CircleHelp size={17} />
+                        My Support Requests
                       </Link>
 
                       {user.role === "seller" && (
@@ -1025,6 +1045,16 @@ const Navbar = () => {
                 Products
               </Link>
 
+              {/* HELP CENTER */}
+              <Link
+                to="/help-center"
+                onClick={closeMenus}
+                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <CircleHelp size={18} />
+                Help Center
+              </Link>
+
               {/* WISHLIST */}
               <Link
                 to="/wishlist"
@@ -1079,6 +1109,16 @@ const Navbar = () => {
                   >
                     <User size={18} />
                     My Account
+                  </Link>
+
+                  {/* MY SUPPORT REQUESTS */}
+                  <Link
+                    to="/my-support-requests"
+                    onClick={closeMenus}
+                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <CircleHelp size={18} />
+                    My Support Requests
                   </Link>
 
                   {/* SELLER DASHBOARD */}

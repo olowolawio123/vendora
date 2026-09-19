@@ -1,10 +1,70 @@
 const express = require("express");
 
 const User = require("../models/User");
+const Seller = require("../models/Seller");
+const Product = require("../models/Product");
+const Order = require("../models/Order");
+
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
 
 const router = express.Router();
+
+// =====================================================
+// GET ADMIN DASHBOARD STATS
+// ADMIN ONLY
+// =====================================================
+router.get(
+  "/stats",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const [
+        totalUsers,
+        totalSellers,
+        totalProducts,
+        totalOrders,
+        pendingSellers,
+      ] = await Promise.all([
+        User.countDocuments({}),
+
+        User.countDocuments({
+          role: "seller",
+        }),
+
+        Product.countDocuments({}),
+
+        Order.countDocuments({}),
+
+        Seller.countDocuments({
+          status: "pending",
+        }),
+      ]);
+
+      res.json({
+        success: true,
+        stats: {
+          totalUsers,
+          totalSellers,
+          totalProducts,
+          totalOrders,
+          pendingSellers,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Get admin stats error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to load admin statistics",
+      });
+    }
+  }
+);
 
 // =====================================================
 // GET ALL USERS
@@ -36,6 +96,214 @@ router.get(
       res.status(500).json({
         success: false,
         message: "Unable to load users",
+      });
+    }
+  }
+);
+
+// =====================================================
+// UPDATE USER ROLE
+// ADMIN ONLY
+// =====================================================
+router.patch(
+  "/users/:userId/role",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { role } = req.body;
+
+      const allowedRoles = [
+        "buyer",
+        "seller",
+        "admin",
+      ];
+
+      if (!allowedRoles.includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user role",
+        });
+      }
+
+      if (
+        req.user.userId.toString() ===
+        req.params.userId
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You cannot change your own admin role",
+        });
+      }
+
+      const user = await User.findById(
+        req.params.userId
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      user.role = role;
+
+      await user.save();
+
+      res.json({
+        success: true,
+        message: "User role updated successfully",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Update user role error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to update user role",
+      });
+    }
+  }
+);
+
+// =====================================================
+// UPDATE USER STATUS
+// ADMIN ONLY
+// =====================================================
+router.patch(
+  "/users/:userId/status",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { status } = req.body;
+
+      const allowedStatuses = [
+        "active",
+        "suspended",
+      ];
+
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user status",
+        });
+      }
+
+      if (
+        req.user.userId.toString() ===
+        req.params.userId
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You cannot suspend your own account",
+        });
+      }
+
+      const user = await User.findById(
+        req.params.userId
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      user.status = status;
+
+      await user.save();
+
+      res.json({
+        success: true,
+        message:
+          status === "suspended"
+            ? "User suspended successfully"
+            : "User activated successfully",
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Update user status error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to update user status",
+      });
+    }
+  }
+);
+
+// =====================================================
+// DELETE USER
+// ADMIN ONLY
+// =====================================================
+router.delete(
+  "/users/:userId",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      if (
+        req.user.userId.toString() ===
+        req.params.userId
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You cannot delete your own admin account",
+        });
+      }
+
+      const user = await User.findById(
+        req.params.userId
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      await User.findByIdAndDelete(
+        req.params.userId
+      );
+
+      res.json({
+        success: true,
+        message: "User deleted successfully",
+      });
+    } catch (error) {
+      console.error(
+        "Delete admin user error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to delete user",
       });
     }
   }

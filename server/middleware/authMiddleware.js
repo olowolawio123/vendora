@@ -1,13 +1,10 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
-const protect = (req, res, next) => {
+const protect = async (req, res, next) => {
   try {
-    // First try the secure HttpOnly cookie
     let token = req.cookies.token;
 
-    // Fallback: allow Authorization: Bearer <token>
-    // This helps browsers where the cross-origin cookie
-    // is not available.
     if (!token) {
       const authHeader = req.headers.authorization;
 
@@ -31,13 +28,33 @@ const protect = (req, res, next) => {
       process.env.JWT_SECRET
     );
 
+    const user = await User.findById(
+      decoded.userId
+    ).select("status");
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User account no longer exists",
+      });
+    }
+
+    if (user.status === "suspended") {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Your account has been suspended. Please contact Vendora support.",
+      });
+    }
+
     req.user = decoded;
 
     next();
   } catch (error) {
     return res.status(401).json({
       success: false,
-      message: "Invalid or expired authentication token",
+      message:
+        "Invalid or expired authentication token",
     });
   }
 };

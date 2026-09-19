@@ -12,18 +12,22 @@ import {
   registerUser,
 } from "../services/authService";
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Check if the user is already logged in
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const data = await getCurrentUser();
-        setUser(data.user);
+
+        if (data?.user) {
+          setUser(data.user);
+        } else {
+          setUser(null);
+        }
       } catch (error) {
         setUser(null);
       } finally {
@@ -34,18 +38,15 @@ export const AuthProvider = ({ children }) => {
     checkAuth();
   }, []);
 
-  // Register
   const register = async (userData) => {
     const data = await registerUser(userData);
+
     return data;
   };
 
-  // Login
   const login = async (credentials) => {
     const data = await loginUser(credentials);
 
-    // Save JWT fallback for browsers that don't
-    // send the authentication cookie.
     if (data.token) {
       localStorage.setItem(
         "vendora_token",
@@ -58,7 +59,6 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  // Logout
   const logout = async () => {
     try {
       await logoutUser();
@@ -83,7 +83,6 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-// Custom hook
-export const useAuth = () => {
+export function useAuth() {
   return useContext(AuthContext);
-};
+}
