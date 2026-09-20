@@ -127,14 +127,12 @@ function App() {
             />
 
             {/* PAYMENT CALLBACK */}
-            <Route
-              path="/payment/callback"
-              element={
-                <ProtectedRoute>
-                  <PaymentCallback />
-                </ProtectedRoute>
-              }
-            />
+            {/* PAYMENT CALLBACK */}
+<Route
+  path="/payment/callback"
+  element={<PaymentCallback />}
+/>
+        
 
             {/* SELLER SETTINGS */}
             <Route
