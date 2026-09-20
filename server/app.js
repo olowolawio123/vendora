@@ -16,6 +16,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const userRoutes = require("./routes/userRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const supportRoutes = require("./routes/supportRoutes");
+const paystackWebhookRoutes = require("./routes/paystackWebhookRoutes");
 
 const { sendTestEmail } = require("./services/emailService");
 
@@ -35,8 +36,23 @@ app.use(
   })
 );
 
-app.use(express.json());
+// =====================================================
+// PAYSTACK WEBHOOK RAW BODY
+// Must come before express.json()
+// =====================================================
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
 app.use(cookieParser());
+app.use(
+  "/api/paystack/webhook",
+  paystackWebhookRoutes
+);
 
 // Routes
 app.use("/api/auth", authRoutes);

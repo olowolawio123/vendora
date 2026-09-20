@@ -3352,6 +3352,54 @@ router.get("/my-orders", protect, async (req, res) => {
     });
   }
 });
+
+
+router.get(
+  "/test-paystack-refund-connection",
+  protect,
+  async (req, res) => {
+    try {
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "PAYSTACK_SECRET_KEY is not configured",
+        });
+      }
+
+      const response = await fetch(
+        "https://api.paystack.co/bank",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      return res.status(response.status).json({
+        success: response.ok && data?.status === true,
+        message:
+          data?.message ||
+          "Paystack connection tested",
+      });
+    } catch (error) {
+      console.error(
+        "Paystack refund connection test error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Unable to connect to Paystack",
+      });
+    }
+  }
+);
 /*
   GET SINGLE ORDER
 

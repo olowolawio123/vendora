@@ -7,6 +7,11 @@ const Order = require("../models/Order");
 
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
+const Payment = require("../models/Payment");
+const Refund = require("../models/Refund");
+const {
+  refundTransaction,
+} = require("../services/paystackRefundService");
 
 const router = express.Router();
 
@@ -386,6 +391,692 @@ router.delete(
       res.status(500).json({
         success: false,
         message: "Unable to delete user",
+      });
+    }
+  }
+);
+
+
+// =====================================================
+// PREVIEW ORDER REFUND
+// ADMIN ONLY
+// NO MONEY IS MOVED
+// =====================================================
+router.get(
+  "/refunds/preview/:orderId",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const mongoose = require("mongoose");
+
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      const order = await Order.findById(
+        req.params.orderId
+      ).select(
+        "_id orderNumber buyer total paymentStatus paymentReference"
+      );
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      const payment = await Payment.findOne({
+        order: order._id,
+      }).select(
+        "_id reference amount currency status refundedAmount"
+      );
+
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message: "Payment record not found",
+        });
+      }
+
+      const alreadyRefunded =
+        Number(payment.refundedAmount || 0);
+
+      const refundableAmount =
+        Number(payment.amount) -
+        alreadyRefunded;
+
+      return res.status(200).json({
+        success: true,
+        refundPreview: {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          paymentReference:
+            payment.reference,
+          paymentAmount:
+            payment.amount,
+          currency:
+            payment.currency,
+          paymentStatus:
+            payment.status,
+          alreadyRefunded,
+          refundableAmount:
+            Math.max(refundableAmount, 0),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Refund preview error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to preview refund",
+      });
+    }
+  }
+);
+
+// =====================================================
+// PROCESS ORDER REFUND
+// ADMIN ONLY
+// =====================================================
+router.post(
+  "/refunds/process",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const {
+        orderId,
+        amount,
+        reason = "",
+      } = req.body;
+
+      // =================================================
+      // VALIDATE ORDER ID
+      // =================================================
+      if (
+        !orderId ||
+        !require("mongoose").Types.ObjectId.isValid(
+          orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      // =================================================
+      // VALIDATE AMOUNT
+      // =================================================
+      const refundAmount = Number(amount);
+
+      if (
+        !Number.isFinite(refundAmount) ||
+        refundAmount <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Refund amount must be greater than zero",
+        });
+      }
+
+      // =================================================
+      // FIND ORDER
+      // =================================================
+      const order = await Order.findById(orderId);
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      // =================================================
+      // ORDER MUST BE PAID
+      // =================================================
+      if (order.paymentStatus !== "paid") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only paid orders can be refunded",
+        });
+      }
+
+      // =================================================
+      // FIND PAYMENT
+      // =================================================
+      const payment = await Payment.findOne({
+        order: order._id,
+      });
+
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Payment record not found",
+        });
+      }
+
+      // =================================================
+      // PAYMENT MUST BE SUCCESSFUL
+      // =================================================
+      if (payment.status !== "successful") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only successful payments can be refunded",
+        });
+      }
+
+      // =================================================
+      // CALCULATE REMAINING REFUNDABLE AMOUNT
+      // =================================================
+      const alreadyRefunded =
+        Number(payment.refundedAmount || 0);
+
+      const refundableAmount =
+        Number(payment.amount) -
+        alreadyRefunded;
+
+      if (refundableAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This payment has already been fully refunded",
+        });
+      }
+
+      if (refundAmount > refundableAmount) {
+        return res.status(400).json({
+          success: false,
+          message: `Maximum refundable amount is ₦${refundableAmount.toFixed(
+            2
+          )}`,
+        });
+      }
+
+      // =================================================
+      // PREVENT DUPLICATE ACTIVE REFUND
+      // =================================================
+      const existingRefund =
+        await Refund.findOne({
+          payment: payment._id,
+          status: {
+            $in: [
+              "pending",
+              "processing",
+            ],
+          },
+        });
+
+      if (existingRefund) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "A refund is already being processed for this payment",
+          refund: existingRefund,
+        });
+      }
+
+      // =================================================
+      // CREATE REFUND RECORD
+      // =================================================
+      const refundReference =
+        `VENDORA-REF-${Date.now()}-${Math.floor(
+          Math.random() * 100000
+        )}`;
+
+      const refund =
+        await Refund.create({
+          order: order._id,
+          payment: payment._id,
+          buyer: order.buyer,
+          reference: refundReference,
+          paystackReference:
+            payment.reference,
+          amount: refundAmount,
+          currency: payment.currency || "NGN",
+          reason: reason.trim(),
+          status: "processing",
+        });
+
+      // =================================================
+      // SEND REFUND TO PAYSTACK
+      // =================================================
+      try {
+        const paystackResult =
+          await refundTransaction({
+            transactionReference:
+              payment.reference,
+            amount: refundAmount,
+          });
+
+        // =================================================
+        // UPDATE REFUND RECORD
+        // =================================================
+        refund.status = "successful";
+
+        refund.paystackRefundId =
+          paystackResult?.data?.id
+            ? String(
+                paystackResult.data.id
+              )
+            : "";
+
+        refund.paystackResponse =
+          paystackResult.data || null;
+
+        refund.processedAt =
+          new Date();
+
+        refund.completedAt =
+          new Date();
+
+        await refund.save();
+
+        // =================================================
+        // UPDATE PAYMENT REFUNDED AMOUNT
+        // =================================================
+        payment.refundedAmount =
+          alreadyRefunded +
+          refundAmount;
+
+        payment.refundReference =
+          refund.reference;
+
+        payment.refundedAt =
+          new Date();
+
+        if (
+          payment.refundedAmount >=
+          Number(payment.amount)
+        ) {
+          payment.status = "refunded";
+        } else {
+          payment.status =
+            "partially_refunded";
+        }
+
+        await payment.save();
+
+        // =================================================
+        // UPDATE ORDER PAYMENT STATUS
+        // =================================================
+        if (
+          payment.refundedAmount >=
+          Number(payment.amount)
+        ) {
+          order.paymentStatus =
+            "refunded";
+        }
+
+        await order.save();
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Refund processed successfully",
+          refund: {
+            id: refund._id,
+            reference:
+              refund.reference,
+            amount:
+              refund.amount,
+            status:
+              refund.status,
+          },
+          payment: {
+            id: payment._id,
+            refundedAmount:
+              payment.refundedAmount,
+            status:
+              payment.status,
+          },
+          order: {
+            id: order._id,
+            paymentStatus:
+              order.paymentStatus,
+          },
+        });
+      } catch (paystackError) {
+        // =================================================
+        // PAYSTACK REFUND FAILED
+        // =================================================
+        refund.status = "failed";
+
+        refund.failureReason =
+          paystackError.message ||
+          "Paystack refund failed";
+
+        refund.failedAt =
+          new Date();
+
+        await refund.save();
+
+        return res.status(502).json({
+          success: false,
+          message:
+            "Paystack refund failed",
+          error:
+            paystackError.message,
+          refund: {
+            id: refund._id,
+            reference:
+              refund.reference,
+            status:
+              refund.status,
+          },
+        });
+      }
+    } catch (error) {
+      console.error(
+        "Process admin refund error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to process refund",
+      });
+    }
+  }
+);
+
+
+// =====================================================
+// PROCESS ORDER REFUND
+// ADMIN ONLY
+// =====================================================
+router.post(
+  "/refunds/process",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const {
+        orderId,
+        amount,
+        reason = "",
+      } = req.body;
+
+      // =================================================
+      // VALIDATE ORDER ID
+      // =================================================
+      if (
+        !orderId ||
+        !require("mongoose").Types.ObjectId.isValid(
+          orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      // =================================================
+      // VALIDATE AMOUNT
+      // =================================================
+      const refundAmount = Number(amount);
+
+      if (
+        !Number.isFinite(refundAmount) ||
+        refundAmount <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Refund amount must be greater than zero",
+        });
+      }
+
+      // =================================================
+      // FIND ORDER
+      // =================================================
+      const order = await Order.findById(orderId);
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      // =================================================
+      // CHECK PAYMENT STATUS
+      // =================================================
+      if (order.paymentStatus !== "paid") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only paid orders can be refunded",
+        });
+      }
+
+      // =================================================
+      // FIND PAYMENT
+      // =================================================
+      const payment = await Payment.findOne({
+        order: order._id,
+      });
+
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Payment record not found",
+        });
+      }
+
+      // =================================================
+      // CHECK PAYMENT STATUS
+      // =================================================
+      if (payment.status !== "successful") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only successful payments can be refunded",
+        });
+      }
+
+      // =================================================
+      // CALCULATE REMAINING REFUNDABLE AMOUNT
+      // =================================================
+      const alreadyRefunded =
+        Number(payment.refundedAmount || 0);
+
+      const refundableAmount =
+        Number(payment.amount) -
+        alreadyRefunded;
+
+      if (refundableAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This payment has already been fully refunded",
+        });
+      }
+
+      if (refundAmount > refundableAmount) {
+        return res.status(400).json({
+          success: false,
+          message: `Maximum refundable amount is ₦${refundableAmount.toFixed(
+            2
+          )}`,
+        });
+      }
+
+      // =================================================
+      // PREVENT DUPLICATE ACTIVE REFUND
+      // =================================================
+      const existingRefund =
+        await Refund.findOne({
+          payment: payment._id,
+          status: {
+            $in: [
+              "pending",
+              "processing",
+            ],
+          },
+        });
+
+      if (existingRefund) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "A refund is already being processed for this payment",
+          refund: existingRefund,
+        });
+      }
+
+      // =================================================
+      // CREATE INTERNAL REFUND RECORD
+      // =================================================
+      const refundReference =
+        `VENDORA-REF-${Date.now()}-${Math.floor(
+          Math.random() * 100000
+        )}`;
+
+      const refund =
+        await Refund.create({
+          order: order._id,
+          payment: payment._id,
+          buyer: order.buyer,
+          reference: refundReference,
+          paystackReference:
+            payment.reference,
+          amount: refundAmount,
+          currency:
+            payment.currency || "NGN",
+          reason: reason.trim(),
+          status: "processing",
+        });
+
+      // =================================================
+      // SEND REFUND REQUEST TO PAYSTACK
+      // =================================================
+      try {
+        const paystackResult =
+          await refundTransaction({
+            transactionReference:
+              payment.reference,
+            amount: refundAmount,
+          });
+
+        // =================================================
+        // SAVE PAYSTACK RESPONSE
+        // IMPORTANT:
+        // THIS DOES NOT MEAN THE REFUND IS COMPLETED.
+        // =================================================
+        refund.status = "processing";
+
+        refund.paystackRefundId =
+          paystackResult?.data?.id
+            ? String(
+                paystackResult.data.id
+              )
+            : "";
+
+        refund.paystackResponse =
+          paystackResult.data || null;
+
+        refund.processedAt =
+          new Date();
+
+        await refund.save();
+
+        // =================================================
+        // DO NOT UPDATE PAYMENT YET
+        // DO NOT UPDATE ORDER YET
+        // DO NOT UPDATE SELLER EARNINGS YET
+        //
+        // Those updates will happen only after Paystack
+        // confirms the refund has actually been processed.
+        // =================================================
+        return res.status(202).json({
+          success: true,
+          message:
+            "Refund request submitted and is being processed",
+          refund: {
+            id: refund._id,
+            reference:
+              refund.reference,
+            amount:
+              refund.amount,
+            status:
+              refund.status,
+            paystackRefundId:
+              refund.paystackRefundId,
+          },
+          payment: {
+            id: payment._id,
+            refundedAmount:
+              alreadyRefunded,
+            status:
+              payment.status,
+          },
+          order: {
+            id: order._id,
+            paymentStatus:
+              order.paymentStatus,
+          },
+        });
+      } catch (paystackError) {
+        // =================================================
+        // PAYSTACK REFUND REQUEST FAILED
+        // =================================================
+        refund.status = "failed";
+
+        refund.failureReason =
+          paystackError.message ||
+          "Paystack refund failed";
+
+        refund.failedAt =
+          new Date();
+
+        await refund.save();
+
+        return res.status(502).json({
+          success: false,
+          message:
+            "Paystack refund failed",
+          error:
+            paystackError.message,
+          refund: {
+            id: refund._id,
+            reference:
+              refund.reference,
+            status:
+              refund.status,
+          },
+        });
+      }
+    } catch (error) {
+      console.error(
+        "Process admin refund error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to process refund",
       });
     }
   }
