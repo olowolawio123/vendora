@@ -50,6 +50,49 @@ const sellerSchema = new mongoose.Schema(
       min: 0,
       max: 5,
     },
+
+    // Seller payout information
+    payout: {
+      bankCode: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      bankName: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      accountNumber: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      accountName: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      paystackRecipientCode: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      verified: {
+        type: Boolean,
+        default: false,
+      },
+
+      verifiedAt: {
+        type: Date,
+        default: null,
+      },
+    },
   },
   {
     timestamps: true,

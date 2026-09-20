@@ -7,10 +7,1430 @@ const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const User = require("../models/User");
 const Seller = require("../models/Seller");
+const Payment = require("../models/Payment");
+const SellerEarning = require("../models/SellerEarning");
 const protect = require("../middleware/authMiddleware");
 const Notification = require("../models/Notification");
+const Withdrawal = require("../models/Withdrawal");
+const {
+  createTransfer,
+} = require("../services/paystackTransferService");
 
 const router = express.Router();
+
+/*
+  SELLER PAYOUT - GET BANKS
+
+  GET /api/orders/seller-payout/banks
+*/
+router.get(
+  "/seller-payout/banks",
+  protect,
+  async (req, res) => {
+    try {
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Paystack is not configured on the server",
+        });
+      }
+
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can manage payout information",
+        });
+      }
+
+      const paystackResponse = await fetch(
+        "https://api.paystack.co/bank?currency=NGN&perPage=100",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          },
+        }
+      );
+
+      const paystackData =
+        await paystackResponse.json();
+
+      if (
+        !paystackResponse.ok ||
+        !paystackData.status
+      ) {
+        console.error(
+          "Paystack bank list error:",
+          paystackData
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            paystackData.message ||
+            "Unable to load banks",
+        });
+      }
+
+      const banks = (paystackData.data || [])
+        .filter(
+          (bank) =>
+            bank.active &&
+            !bank.is_deleted &&
+            bank.currency === "NGN"
+        )
+        .map((bank) => ({
+          name: bank.name,
+          code: bank.code,
+        }));
+
+      return res.json({
+        success: true,
+        banks,
+      });
+    } catch (error) {
+      console.error(
+        "Get seller payout banks error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load banks",
+      });
+    }
+  }
+);
+
+/*
+  SELLER PAYOUT - VERIFY BANK ACCOUNT
+
+  POST /api/orders/seller-payout/verify
+*/
+router.post(
+  "/seller-payout/verify",
+  protect,
+  async (req, res) => {
+    try {
+      const {
+        bankCode,
+        bankName,
+        accountNumber,
+      } = req.body;
+
+      if (
+        !bankCode ||
+        !accountNumber
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Bank and account number are required",
+        });
+      }
+
+      const cleanBankCode =
+        String(bankCode).trim();
+
+      const cleanAccountNumber =
+        String(accountNumber).trim();
+
+      if (
+        !/^\d+$/.test(
+          cleanAccountNumber
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Account number must contain only numbers",
+        });
+      }
+
+      if (
+        cleanAccountNumber.length < 10
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Enter a valid Nigerian bank account number",
+        });
+      }
+
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Paystack is not configured on the server",
+        });
+      }
+
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can manage payout information",
+        });
+      }
+
+      /*
+        Resolve the bank account through Paystack.
+      */
+      const resolveUrl =
+        `https://api.paystack.co/bank/resolve` +
+        `?account_number=${encodeURIComponent(
+          cleanAccountNumber
+        )}` +
+        `&bank_code=${encodeURIComponent(
+          cleanBankCode
+        )}`;
+
+      const resolveResponse = await fetch(
+        resolveUrl,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          },
+        }
+      );
+
+      const resolveData =
+        await resolveResponse.json();
+
+      if (
+        !resolveResponse.ok ||
+        !resolveData.status
+      ) {
+        console.error(
+          "Paystack account resolution error:",
+          resolveData
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            resolveData.message ||
+            "Unable to verify this bank account",
+        });
+      }
+
+      const accountName =
+        resolveData.data?.account_name || "";
+
+      if (!accountName) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Unable to retrieve the bank account name",
+        });
+      }
+
+      /*
+        Create a Paystack transfer recipient.
+
+        We use the verified account name returned
+        by Paystack rather than trusting a name
+        supplied by the seller.
+      */
+      const recipientResponse =
+        await fetch(
+          "https://api.paystack.co/transferrecipient",
+          {
+            method: "POST",
+
+            headers: {
+              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              type: "nuban",
+              name: accountName,
+              account_number:
+                cleanAccountNumber,
+              bank_code:
+                cleanBankCode,
+              currency: "NGN",
+            }),
+          }
+        );
+
+      const recipientData =
+        await recipientResponse.json();
+
+      if (
+        !recipientResponse.ok ||
+        !recipientData.status
+      ) {
+        console.error(
+          "Paystack recipient creation error:",
+          recipientData
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            recipientData.message ||
+            "Unable to create payout recipient",
+        });
+      }
+
+      const recipient =
+        recipientData.data;
+
+      /*
+        Save only the information Vendora
+        needs for future payouts.
+      */
+      seller.payout = {
+        bankCode: cleanBankCode,
+
+        bankName:
+          bankName ||
+          recipient.details?.bank_name ||
+          "",
+
+        accountNumber:
+          cleanAccountNumber,
+
+        accountName,
+
+        paystackRecipientCode:
+          recipient.recipient_code,
+
+        verified: true,
+
+        verifiedAt: new Date(),
+      };
+
+      await seller.save();
+
+      return res.json({
+        success: true,
+        message:
+          "Bank account verified successfully",
+
+        payout: {
+          bankCode:
+            seller.payout.bankCode,
+
+          bankName:
+            seller.payout.bankName,
+
+          accountNumber:
+            seller.payout.accountNumber,
+
+          accountName:
+            seller.payout.accountName,
+
+          verified:
+            seller.payout.verified,
+
+          verifiedAt:
+            seller.payout.verifiedAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Verify seller payout account error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to verify bank account",
+      });
+    }
+  }
+);
+
+
+
+/*
+  SELLER WITHDRAWAL - BALANCE
+
+  GET /api/orders/seller-withdrawal/balance
+*/
+router.get(
+  "/seller-withdrawal/balance",
+  protect,
+  async (req, res) => {
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can view withdrawal balance",
+        });
+      }
+
+      const availableEarnings =
+  await SellerEarning.find({
+    seller: seller._id,
+    status: {
+      $in: [
+        "available",
+        "withdrawal_pending",
+      ],
+    },
+  });
+
+const pendingEarnings =
+  await SellerEarning.find({
+    seller: seller._id,
+    status: "withdrawal_pending",
+  });
+
+      const withdrawnEarnings =
+        await SellerEarning.find({
+          seller: seller._id,
+          status: "withdrawn",
+        });
+
+      const availableAmount =
+  availableEarnings.reduce(
+    (total, earning) =>
+      total +
+      Math.max(
+        0,
+        Number(earning.netAmount || 0) -
+          Number(earning.withdrawnAmount || 0) -
+          Number(earning.reservedAmount || 0)
+      ),
+    0
+  );
+
+const pendingWithdrawalAmount =
+  pendingEarnings.reduce(
+    (total, earning) =>
+      total +
+      Number(earning.reservedAmount || 0),
+    0
+  );
+
+const withdrawnAmount =
+  withdrawnEarnings.reduce(
+    (total, earning) =>
+      total +
+      Number(earning.withdrawnAmount || 0),
+    0
+  );
+
+      const pendingWithdrawals =
+        await Withdrawal.find({
+          seller: seller._id,
+          status: {
+            $in: [
+              "pending",
+              "processing",
+            ],
+          },
+        }).sort({
+          createdAt: -1,
+        });
+
+      return res.json({
+        success: true,
+
+        balance: {
+          available: availableAmount,
+          pendingWithdrawal:
+            pendingWithdrawalAmount,
+          withdrawn: withdrawnAmount,
+          currency: "NGN",
+        },
+
+        payout: {
+          bankName:
+            seller.payout?.bankName || "",
+          accountNumber:
+            seller.payout?.accountNumber || "",
+          accountName:
+            seller.payout?.accountName || "",
+          verified:
+            seller.payout?.verified || false,
+        },
+
+        pendingWithdrawals,
+      });
+    } catch (error) {
+      console.error(
+        "Get seller withdrawal balance error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load withdrawal balance",
+      });
+    }
+  }
+);
+
+
+/*
+  SELLER WITHDRAWAL - HISTORY
+
+  GET /api/orders/seller-withdrawal/history
+*/
+router.get(
+  "/seller-withdrawal/history",
+  protect,
+  async (req, res) => {
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can view withdrawals",
+        });
+      }
+
+      const withdrawals =
+        await Withdrawal.find({
+          seller: seller._id,
+        })
+          .sort({
+            createdAt: -1,
+          })
+          .lean();
+
+      return res.json({
+        success: true,
+        withdrawals,
+      });
+    } catch (error) {
+      console.error(
+        "Seller withdrawal history error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load withdrawal history",
+      });
+    }
+  }
+);
+
+
+/*
+  SELLER WITHDRAWAL - REQUEST WITHDRAWAL
+
+  POST /api/orders/seller-withdrawal/request
+*/
+router.post(
+  "/seller-withdrawal/request",
+  protect,
+  async (req, res) => {
+    const session = await mongoose.startSession();
+
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      }).session(session);
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can request withdrawals",
+        });
+      }
+
+      if (
+        !seller.payout?.verified ||
+        !seller.payout?.paystackRecipientCode
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please verify your payout bank account before requesting a withdrawal",
+        });
+      }
+
+      /*
+        Optional withdrawal amount.
+
+        If amount is not supplied, the seller can
+        withdraw the full available balance.
+
+        If amount is supplied, only that amount
+        will be reserved.
+      */
+      const requestedAmount =
+        req.body?.amount !== undefined
+          ? Number(req.body.amount)
+          : null;
+
+      if (
+        requestedAmount !== null &&
+        (!Number.isFinite(requestedAmount) ||
+          requestedAmount <= 0)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Withdrawal amount must be greater than zero",
+        });
+      }
+
+      let withdrawalResult = null;
+
+      await session.withTransaction(async () => {
+        /*
+          Find earnings that are available and have
+          money that has not already been withdrawn
+          or reserved for another withdrawal.
+        */
+        const availableEarnings =
+          await SellerEarning.find({
+            seller: seller._id,
+            status: "available",
+          })
+            .sort({
+              createdAt: 1,
+            })
+            .session(session);
+
+        if (!availableEarnings.length) {
+          throw new Error(
+            "NO_AVAILABLE_EARNINGS"
+          );
+        }
+
+        /*
+          Calculate the true available amount:
+
+          netAmount
+          - withdrawnAmount
+          - reservedAmount
+        */
+        const availableAmount =
+          availableEarnings.reduce(
+            (total, earning) =>
+              total +
+              Math.max(
+                0,
+                Number(
+                  earning.netAmount || 0
+                ) -
+                  Number(
+                    earning.withdrawnAmount || 0
+                  ) -
+                  Number(
+                    earning.reservedAmount || 0
+                  )
+              ),
+            0
+          );
+
+        if (availableAmount <= 0) {
+          throw new Error(
+            "NO_AVAILABLE_EARNINGS"
+          );
+        }
+
+        /*
+          Prevent multiple active withdrawals
+          for the same seller.
+        */
+        const existingWithdrawal =
+          await Withdrawal.findOne({
+            seller: seller._id,
+            status: {
+              $in: [
+                "pending",
+                "processing",
+              ],
+            },
+          }).session(session);
+
+        if (existingWithdrawal) {
+          throw new Error(
+            "WITHDRAWAL_ALREADY_PENDING"
+          );
+        }
+
+        /*
+          If the seller supplied an amount, use it.
+
+          Otherwise withdraw the entire available
+          balance.
+        */
+        const withdrawalAmount =
+          requestedAmount === null
+            ? availableAmount
+            : requestedAmount;
+
+        /*
+          Protect against withdrawing more than
+          the seller actually has available.
+        */
+        if (
+          withdrawalAmount >
+          availableAmount
+        ) {
+          throw new Error(
+            "INSUFFICIENT_AVAILABLE_BALANCE"
+          );
+        }
+
+        /*
+          Keep money calculations at two decimal
+          places.
+        */
+        const finalWithdrawalAmount =
+          Math.round(
+            withdrawalAmount * 100
+          ) / 100;
+
+        if (
+          finalWithdrawalAmount <= 0
+        ) {
+          throw new Error(
+            "NO_AVAILABLE_EARNINGS"
+          );
+        }
+
+        /*
+          Create the withdrawal first.
+        */
+        const withdrawal =
+          new Withdrawal({
+            seller: seller._id,
+
+            amount:
+              finalWithdrawalAmount,
+
+            currency: "NGN",
+
+            status: "pending",
+
+            recipientCode:
+              seller.payout
+                .paystackRecipientCode,
+
+            bankCode:
+              seller.payout.bankCode,
+
+            bankName:
+              seller.payout.bankName,
+
+            accountNumber:
+              seller.payout.accountNumber,
+
+            accountName:
+              seller.payout.accountName,
+
+            reason:
+              "Seller earnings withdrawal",
+          });
+
+        await withdrawal.save({
+          session,
+        });
+
+        /*
+          Reserve the requested amount from the
+          oldest available earnings first.
+
+          This is important because it lets us
+          support partial withdrawals safely.
+        */
+        let remainingAmount =
+          finalWithdrawalAmount;
+
+        for (
+          const earning of availableEarnings
+        ) {
+          if (remainingAmount <= 0) {
+            break;
+          }
+
+          const earningAvailable =
+            Math.max(
+              0,
+              Number(
+                earning.netAmount || 0
+              ) -
+                Number(
+                  earning.withdrawnAmount ||
+                    0
+                ) -
+                Number(
+                  earning.reservedAmount ||
+                    0
+                )
+            );
+
+          if (earningAvailable <= 0) {
+            continue;
+          }
+
+          const amountToReserve =
+            Math.min(
+              earningAvailable,
+              remainingAmount
+            );
+
+          earning.reservedAmount =
+            Number(
+              earning.reservedAmount || 0
+            ) + amountToReserve;
+
+          earning.status =
+            "withdrawal_pending";
+
+          earning.withdrawal =
+            withdrawal._id;
+
+          await earning.save({
+            session,
+          });
+
+          remainingAmount =
+            Math.round(
+              (remainingAmount -
+                amountToReserve) *
+                100
+            ) / 100;
+        }
+
+        /*
+          This should never happen because we
+          already checked the available balance.
+        */
+        if (remainingAmount > 0) {
+          throw new Error(
+            "WITHDRAWAL_RESERVATION_FAILED"
+          );
+        }
+
+        withdrawalResult =
+          withdrawal;
+      });
+
+      return res.status(201).json({
+        success: true,
+
+        message:
+          "Withdrawal request created successfully",
+
+        withdrawal: {
+          id:
+            withdrawalResult._id,
+
+          amount:
+            withdrawalResult.amount,
+
+          currency:
+            withdrawalResult.currency,
+
+          status:
+            withdrawalResult.status,
+
+          bankName:
+            withdrawalResult.bankName,
+
+          accountNumber:
+            withdrawalResult.accountNumber,
+
+          accountName:
+            withdrawalResult.accountName,
+
+          createdAt:
+            withdrawalResult.createdAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Seller withdrawal request error:",
+        error
+      );
+
+      if (
+        error.message ===
+        "NO_AVAILABLE_EARNINGS"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You do not have any available earnings to withdraw",
+        });
+      }
+
+      if (
+        error.message ===
+        "WITHDRAWAL_ALREADY_PENDING"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You already have a withdrawal being processed",
+        });
+      }
+
+      if (
+        error.message ===
+        "INSUFFICIENT_AVAILABLE_BALANCE"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Withdrawal amount is greater than your available balance",
+        });
+      }
+
+      if (
+        error.message ===
+        "WITHDRAWAL_RESERVATION_FAILED"
+      ) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to safely reserve the withdrawal amount",
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to create withdrawal request",
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+);
+
+
+/*
+  SELLER WITHDRAWAL - CANCEL PENDING WITHDRAWAL
+
+  POST /api/orders/seller-withdrawal/cancel
+*/
+router.post(
+  "/seller-withdrawal/cancel",
+  protect,
+  async (req, res) => {
+    const session = await mongoose.startSession();
+
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      }).session(session);
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can cancel withdrawals",
+        });
+      }
+
+      let cancelledWithdrawal = null;
+
+      await session.withTransaction(async () => {
+        const withdrawal =
+          await Withdrawal.findOne({
+            seller: seller._id,
+            status: "pending",
+          })
+            .sort({
+              createdAt: -1,
+            })
+            .session(session);
+
+        if (!withdrawal) {
+          throw new Error(
+            "NO_PENDING_WITHDRAWAL"
+          );
+        }
+
+        /*
+          Release the money reserved for this
+          withdrawal.
+        */
+        const earnings =
+          await SellerEarning.find({
+            seller: seller._id,
+            withdrawal: withdrawal._id,
+            status: "withdrawal_pending",
+          }).session(session);
+
+        for (const earning of earnings) {
+          earning.reservedAmount = 0;
+
+          earning.withdrawal = null;
+
+          earning.status = "available";
+
+          await earning.save({
+            session,
+          });
+        }
+
+        /*
+          Keep the withdrawal record for the
+          financial audit trail.
+        */
+        withdrawal.status = "cancelled";
+
+        withdrawal.failureReason =
+          withdrawal.failureReason ||
+          "Withdrawal cancelled";
+
+        withdrawal.failedAt = new Date();
+
+        await withdrawal.save({
+          session,
+        });
+
+        cancelledWithdrawal =
+          withdrawal;
+      });
+
+      return res.json({
+        success: true,
+
+        message:
+          "Withdrawal cancelled successfully",
+
+        withdrawal: {
+          id:
+            cancelledWithdrawal._id,
+
+          amount:
+            cancelledWithdrawal.amount,
+
+          currency:
+            cancelledWithdrawal.currency,
+
+          status:
+            cancelledWithdrawal.status,
+
+          failureReason:
+            cancelledWithdrawal.failureReason,
+
+          failedAt:
+            cancelledWithdrawal.failedAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Cancel seller withdrawal error:",
+        error
+      );
+
+      if (
+        error.message ===
+        "NO_PENDING_WITHDRAWAL"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "No pending withdrawal found",
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to cancel withdrawal",
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+);
+
+/*
+  SELLER WITHDRAWAL - PROCESS TEST/REAL TRANSFER
+
+  POST /api/orders/seller-withdrawal/process
+*/
+/*
+  SELLER WITHDRAWAL - PROCESS TEST/REAL TRANSFER
+
+  POST /api/orders/seller-withdrawal/process
+*/
+router.post(
+  "/seller-withdrawal/process",
+  protect,
+  async (req, res) => {
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can process withdrawals",
+        });
+      }
+
+      /*
+        Find the seller's pending withdrawal.
+      */
+      const withdrawal =
+        await Withdrawal.findOne({
+          seller: seller._id,
+          status: "pending",
+        }).sort({
+          createdAt: 1,
+        });
+
+      if (!withdrawal) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "No pending withdrawal found",
+        });
+      }
+
+      /*
+        Find ONLY the earnings reserved
+        for this withdrawal.
+      */
+      const withdrawalEarnings =
+        await SellerEarning.find({
+          seller: seller._id,
+          withdrawal: withdrawal._id,
+          status: "withdrawal_pending",
+        });
+
+      if (!withdrawalEarnings.length) {
+        withdrawal.status = "cancelled";
+
+        withdrawal.failureReason =
+          "No reserved earnings found for this withdrawal";
+
+        withdrawal.failedAt = new Date();
+
+        await withdrawal.save();
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "No reserved earnings found for this withdrawal",
+        });
+      }
+
+      /*
+        Calculate the exact amount reserved
+        for this withdrawal.
+      */
+      const reservedAmount =
+        withdrawalEarnings.reduce(
+          (total, earning) =>
+            total +
+            Number(
+              earning.reservedAmount || 0
+            ),
+          0
+        );
+
+      if (
+        reservedAmount <= 0 ||
+        Math.round(reservedAmount * 100) !==
+          Math.round(withdrawal.amount * 100)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Withdrawal reservation does not match the withdrawal amount",
+        });
+      }
+
+      /*
+        Move withdrawal into processing
+        before calling Paystack.
+      */
+      withdrawal.status = "processing";
+
+      await withdrawal.save();
+
+      const transferReference =
+        `VENDORA-WD-${Date.now()}-${crypto
+          .randomBytes(4)
+          .toString("hex")
+          .toUpperCase()}`;
+
+      let transferResult;
+
+      try {
+        transferResult =
+          await createTransfer({
+            amount: withdrawal.amount,
+
+            recipientCode:
+              withdrawal.recipientCode,
+
+            reference:
+              transferReference,
+
+            reason:
+              withdrawal.reason ||
+              "Vendora seller withdrawal",
+          });
+      } catch (transferError) {
+        /*
+          Paystack transfer failed.
+
+          Release ONLY the amount reserved
+          for this withdrawal.
+        */
+        for (
+          const earning of withdrawalEarnings
+        ) {
+          earning.reservedAmount = Math.max(
+            0,
+            Number(
+              earning.reservedAmount || 0
+            )
+          );
+
+          /*
+            The reserved amount belongs to
+            this withdrawal. Release it.
+          */
+          earning.reservedAmount = 0;
+
+          earning.withdrawal = null;
+
+          /*
+            If nothing has been withdrawn
+            from this earning, return it
+            to available status.
+          */
+          earning.status = "available";
+
+          await earning.save();
+        }
+
+        withdrawal.status = "failed";
+
+        withdrawal.failureReason =
+          transferError.message ||
+          "Paystack transfer failed";
+
+        withdrawal.transferReference =
+          transferReference;
+
+        withdrawal.failedAt = new Date();
+
+        withdrawal.processedAt = new Date();
+
+        await withdrawal.save();
+
+        return res.status(400).json({
+          success: false,
+          message:
+            transferError.message ||
+            "Paystack transfer failed",
+
+          withdrawal: {
+            id: withdrawal._id,
+
+            amount:
+              withdrawal.amount,
+
+            currency:
+              withdrawal.currency,
+
+            status:
+              withdrawal.status,
+
+            failureReason:
+              withdrawal.failureReason,
+          },
+        });
+      }
+
+      const transferData =
+        transferResult.data || {};
+
+      withdrawal.transferCode =
+        transferData.transfer_code || "";
+
+      withdrawal.transferReference =
+        transferData.reference ||
+        transferReference;
+
+      withdrawal.paystackResponse =
+        transferData;
+
+      withdrawal.processedAt =
+        new Date();
+
+      /*
+        Paystack may return different statuses.
+        Only finalize the earning when the
+        transfer itself is successful.
+      */
+      if (
+        transferData.status === "success"
+      ) {
+        withdrawal.status = "successful";
+
+        withdrawal.completedAt =
+          new Date();
+
+        /*
+          Finalize ONLY the reserved amount.
+        */
+        for (
+          const earning of withdrawalEarnings
+        ) {
+          const reserved =
+            Number(
+              earning.reservedAmount || 0
+            );
+
+          if (reserved <= 0) {
+            continue;
+          }
+
+          earning.withdrawnAmount =
+            Number(
+              earning.withdrawnAmount || 0
+            ) + reserved;
+
+          earning.reservedAmount = 0;
+
+          earning.withdrawal =
+            withdrawal._id;
+
+          /*
+            If the entire earning has now
+            been withdrawn, mark it withdrawn.
+            Otherwise keep it available.
+          */
+          const remainingAmount =
+            Math.max(
+              0,
+              Number(
+                earning.netAmount || 0
+              ) -
+                Number(
+                  earning.withdrawnAmount ||
+                    0
+                )
+            );
+
+          if (remainingAmount > 0) {
+            earning.status = "available";
+          } else {
+            earning.status = "withdrawn";
+          }
+
+          await earning.save();
+        }
+      } else {
+        /*
+          Transfer was accepted but is not
+          yet successful.
+
+          Keep the withdrawal processing and
+          keep the earnings reserved.
+        */
+        withdrawal.status =
+          "processing";
+      }
+
+      await withdrawal.save();
+
+      return res.json({
+        success: true,
+
+        message:
+          withdrawal.status ===
+          "successful"
+            ? "Withdrawal transferred successfully"
+            : "Withdrawal transfer is being processed",
+
+        withdrawal: {
+          id:
+            withdrawal._id,
+
+          amount:
+            withdrawal.amount,
+
+          currency:
+            withdrawal.currency,
+
+          status:
+            withdrawal.status,
+
+          transferCode:
+            withdrawal.transferCode,
+
+          transferReference:
+            withdrawal.transferReference,
+
+          bankName:
+            withdrawal.bankName,
+
+          accountNumber:
+            withdrawal.accountNumber,
+
+          accountName:
+            withdrawal.accountName,
+
+          processedAt:
+            withdrawal.processedAt,
+
+          completedAt:
+            withdrawal.completedAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Process seller withdrawal error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to process withdrawal",
+      });
+    }
+  }
+);
 
 const generateOrderNumber = () => {
   const timestamp = Date.now()
@@ -141,12 +1561,12 @@ router.post("/", protect, async (req, res) => {
     });
 
     await Notification.create({
-  user: req.user.userId,
-  type: "order_placed",
-  title: "Order placed successfully",
-  message: `Your order ${order.orderNumber} has been placed successfully.`,
-  order: order._id,
-});
+      user: req.user.userId,
+      type: "order_placed",
+      title: "Order placed successfully",
+      message: `Your order ${order.orderNumber} has been placed successfully.`,
+      order: order._id,
+    });
 
     res.status(201).json({
       success: true,
@@ -292,17 +1712,17 @@ router.get(
       );
 
       return res.json({
-  success: true,
+        success: true,
 
-  stats: {
-    orders: orders.length,
-    sales: totalSales,
-    rating: seller.rating || 0,
-  },
+        stats: {
+          orders: orders.length,
+          sales: totalSales,
+          rating: seller.rating || 0,
+        },
 
-  recentOrders:
-    recentOrders.slice(0, 5),
-});
+        recentOrders:
+          recentOrders.slice(0, 5),
+      });
     } catch (error) {
       console.error(
         "Seller dashboard error:",
@@ -317,7 +1737,6 @@ router.get(
     }
   }
 );
-
 
 /*
   GET SELLER ORDERS
@@ -393,7 +1812,6 @@ router.get(
     }
   }
 );
-
 
 /*
   UPDATE SELLER ORDER ITEM STATUS
@@ -528,69 +1946,84 @@ router.patch(
         });
       }
 
-      
-orderItem.status = status;
+      orderItem.status = status;
+
+if (status === "delivered") {
+  await SellerEarning.updateMany(
+    {
+      seller: seller._id,
+      order: order._id,
+      product: orderItem.product,
+      status: "pending",
+    },
+    {
+      $set: {
+        status: "available",
+        availableAt: new Date(),
+      },
+    }
+  );
+}
 
 await order.save();
 
-// Create buyer notification
-const notificationMessages = {
-  processing: {
-    title: "Order is being processed",
-    message: `Your order ${order.orderNumber} is now being processed by the seller.`,
-    type: "order_processing",
-  },
+      const notificationMessages = {
+        processing: {
+          title: "Order is being processed",
+          message: `Your order ${order.orderNumber} is now being processed by the seller.`,
+          type: "order_processing",
+        },
 
-  shipped: {
-    title: "Order shipped",
-    message: `Your order ${order.orderNumber} has been shipped by the seller.`,
-    type: "order_shipped",
-  },
+        shipped: {
+          title: "Order shipped",
+          message: `Your order ${order.orderNumber} has been shipped by the seller.`,
+          type: "order_shipped",
+        },
 
-  delivered: {
-    title: "Order delivered",
-    message: `Your order ${order.orderNumber} has been marked as delivered by the seller.`,
-    type: "order_delivered",
-  },
+        delivered: {
+          title: "Order delivered",
+          message: `Your order ${order.orderNumber} has been marked as delivered by the seller.`,
+          type: "order_delivered",
+        },
 
-  cancelled: {
-    title: "Order cancelled",
-    message: `Your order ${order.orderNumber} has been cancelled by the seller.`,
-    type: "order_cancelled",
-  },
-};
+        cancelled: {
+          title: "Order cancelled",
+          message: `Your order ${order.orderNumber} has been cancelled by the seller.`,
+          type: "order_cancelled",
+        },
+      };
 
-const notification = notificationMessages[status];
+      const notification =
+        notificationMessages[status];
 
-if (notification) {
-  try {
-    await Notification.create({
-      user: order.buyer,
-      type: notification.type,
-      title: notification.title,
-      message: notification.message,
-      order: order._id,
-    });
-  } catch (notificationError) {
-    console.error(
-      "Buyer notification creation error:",
-      notificationError
-    );
-  }
-}
+      if (notification) {
+        try {
+          await Notification.create({
+            user: order.buyer,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            order: order._id,
+          });
+        } catch (notificationError) {
+          console.error(
+            "Buyer notification creation error:",
+            notificationError
+          );
+        }
+      }
 
-return res.json({
-  success: true,
-  message: "Order item status updated successfully",
-  order: {
-    id: order._id,
-    orderNumber: order.orderNumber,
-    productId: orderItem.product,
-    status: orderItem.status,
-  },
-});
-
-      
+      return res.json({
+        success: true,
+        message:
+          "Order item status updated successfully",
+        order: {
+          id: order._id,
+          orderNumber: order.orderNumber,
+          productId: orderItem.product,
+          status: orderItem.status,
+        },
+      });
     } catch (error) {
       console.error(
         "Update seller order item status error:",
@@ -715,6 +2148,35 @@ router.post(
       const paymentReference =
         paystackData.data.reference;
 
+      await Payment.findOneAndUpdate(
+        {
+          order: order._id,
+        },
+        {
+          $set: {
+            buyer: req.user.userId,
+            reference: paymentReference,
+            amount: order.total,
+            currency: "NGN",
+            status: "pending",
+            verificationProcessed: false,
+            transactionId: "",
+            channel: "",
+            gatewayResponse: "",
+            paidAt: null,
+            refundedAmount: 0,
+            refundReference: "",
+            refundedAt: null,
+            verifiedAt: null,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+
       order.paymentReference =
         paymentReference;
 
@@ -811,6 +2273,9 @@ router.post(
         });
       }
 
+      /*
+        Verify directly with Paystack.
+      */
       const paystackResponse = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(
           reference
@@ -851,6 +2316,10 @@ router.post(
         });
       }
 
+      /*
+        Make sure this Paystack transaction
+        belongs to this order.
+      */
       if (
         order.paymentReference &&
         order.paymentReference !==
@@ -863,6 +2332,10 @@ router.post(
         });
       }
 
+      /*
+        Make sure the amount paid is exactly
+        the amount expected by Vendora.
+      */
       const expectedAmount =
         Math.round(order.total * 100);
 
@@ -877,6 +2350,9 @@ router.post(
         });
       }
 
+      /*
+        Make sure the currency is correct.
+      */
       if (
         transaction.currency !== "NGN"
       ) {
@@ -901,6 +2377,10 @@ router.post(
             );
           }
 
+          /*
+            Protect against duplicate payment
+            processing.
+          */
           if (
             currentOrder.paymentStatus ===
             "paid"
@@ -908,6 +2388,10 @@ router.post(
             return;
           }
 
+          /*
+            Reduce stock only after Paystack
+            confirms successful payment.
+          */
           for (
             const item of currentOrder.items
           ) {
@@ -941,6 +2425,9 @@ router.post(
             }
           }
 
+          /*
+            Update the order.
+          */
           currentOrder.paymentStatus =
             "paid";
 
@@ -954,6 +2441,284 @@ router.post(
             session,
           });
 
+          /*
+            Vendora commission.
+
+            Commission is calculated from the
+            product subtotal only.
+
+            Delivery fees are excluded.
+          */
+          const productSubtotal =
+            Number(
+              currentOrder.subtotal || 0
+            );
+
+          const commissionRate =
+            Number(
+              process.env.VENDORA_COMMISSION_RATE ||
+                5
+            );
+
+          /*
+            Calculate commission for every
+            individual order item.
+
+            This is important because an order
+            can contain products from multiple
+            sellers.
+          */
+          const sellerEarningData =
+            currentOrder.items.map(
+              (item) => {
+                const grossAmount =
+                  Number(
+                    item.subtotal || 0
+                  );
+
+                const commissionAmount =
+                  Math.round(
+                    grossAmount *
+                      (commissionRate / 100) *
+                      100
+                  ) / 100;
+
+                const netAmount =
+                  Math.max(
+                    grossAmount -
+                      commissionAmount,
+                    0
+                  );
+
+                const earningKey =
+                  `${currentOrder._id.toString()}-${item.seller.toString()}-${item.product.toString()}`;
+
+                return {
+                  seller:
+                    item.seller,
+
+                  order:
+                    currentOrder._id,
+
+                  product:
+                    item.product,
+
+                  productTitle:
+                    item.title,
+
+                  quantity:
+                    item.quantity,
+
+                  grossAmount,
+
+                  commissionAmount,
+
+                  netAmount,
+
+                  earningKey,
+                };
+              }
+            );
+
+          /*
+            Total Vendora commission across
+            all products in the order.
+          */
+          const totalCommissionAmount =
+            sellerEarningData.reduce(
+              (sum, earning) =>
+                sum +
+                Number(
+                  earning.commissionAmount ||
+                    0
+                ),
+              0
+            );
+
+          const roundedCommissionAmount =
+            Math.round(
+              totalCommissionAmount *
+                100
+            ) / 100;
+
+          /*
+            Seller amount is the product
+            subtotal minus Vendora commission.
+
+            Delivery fees are excluded because
+            they are not seller earnings.
+          */
+          const sellerAmount =
+            Math.max(
+              productSubtotal -
+                roundedCommissionAmount,
+              0
+            );
+
+          /*
+            Create/update the permanent
+            successful Payment record.
+
+            We retrieve the document so its
+            _id can be attached to SellerEarning.
+          */
+          const payment =
+            await Payment.findOneAndUpdate(
+              {
+                order:
+                  currentOrder._id,
+              },
+              {
+                $set: {
+                  buyer:
+                    currentOrder.buyer,
+
+                  reference:
+                    transaction.reference,
+
+                  transactionId:
+                    transaction.id
+                      ? String(
+                          transaction.id
+                        )
+                      : "",
+
+                  amount:
+                    Number(
+                      currentOrder.total ||
+                        0
+                    ),
+
+                  currency:
+                    transaction.currency ||
+                    "NGN",
+
+                  status:
+                    "successful",
+
+                  channel:
+                    transaction.channel ||
+                    "",
+
+                  gatewayResponse:
+                    transaction.gateway_response ||
+                    "",
+
+                  paidAt:
+                    transaction.paid_at
+                      ? new Date(
+                          transaction.paid_at
+                        )
+                      : new Date(),
+
+                  commissionAmount:
+                    roundedCommissionAmount,
+
+                  sellerAmount,
+
+                  paystackData:
+                    transaction,
+
+                  verificationProcessed:
+                    true,
+
+                  verifiedAt:
+                    new Date(),
+                },
+              },
+              {
+                upsert: true,
+                new: true,
+                setDefaultsOnInsert: true,
+                session,
+              }
+            );
+
+          if (!payment) {
+            throw new Error(
+              "Unable to create payment record"
+            );
+          }
+
+          /*
+            Create seller earnings.
+
+            Each product gets its own earning
+            record so multi-seller orders are
+            accounted for correctly.
+
+            The unique earningKey prevents the
+            same earning from being created twice.
+          */
+          for (
+            const earning of sellerEarningData
+          ) {
+            await SellerEarning.findOneAndUpdate(
+              {
+                earningKey:
+                  earning.earningKey,
+              },
+              {
+                $setOnInsert: {
+                  seller:
+                    earning.seller,
+
+                  order:
+                    earning.order,
+
+                  payment:
+                    payment._id,
+
+                  product:
+                    earning.product,
+
+                  productTitle:
+                    earning.productTitle,
+
+                  quantity:
+                    earning.quantity,
+
+                  grossAmount:
+                    earning.grossAmount,
+
+                  commissionAmount:
+                    earning.commissionAmount,
+
+                  netAmount:
+                    earning.netAmount,
+
+                  status:
+                    "pending",
+
+                  availableAt:
+                    null,
+
+                  withdrawnAmount:
+                    0,
+
+                  refundedAmount:
+                    0,
+
+                  withdrawal:
+                    null,
+
+                  earningKey:
+                    earning.earningKey,
+                },
+              },
+              {
+                upsert: true,
+                new: true,
+                setDefaultsOnInsert: true,
+                session,
+              }
+            );
+          }
+
+          /*
+            Remove the purchased products from
+            the buyer's cart.
+          */
           const purchasedProductIds =
             currentOrder.items.map(
               (item) =>
@@ -999,7 +2764,7 @@ router.post(
       });
     } catch (error) {
       console.error(
-        "Verify Paystack payment error:",
+        "Verify Paystack payment error:",  
         error
       );
 
