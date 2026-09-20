@@ -12,8 +12,6 @@ import {
 import apiFetch from "../services/apiFetch";
 import { useAuth } from "../context/AuthContext";
 
-const API_URL = import.meta.env.VITE_API_URL;
-
 const Checkout = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -21,7 +19,7 @@ const Checkout = () => {
   const [cart, setCart] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-const [processingPayment, setProcessingPayment] = useState(false);
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   const [address, setAddress] = useState({
     fullName: user?.name || "",
@@ -56,10 +54,44 @@ const [processingPayment, setProcessingPayment] = useState(false);
             return;
           }
 
-          throw new Error(data.message || "Unable to load cart");
+          throw new Error(
+            data.message || "Unable to load cart"
+          );
         }
 
-        setCart(data.cart);
+        const loadedCart = data.cart;
+
+        /*
+          Remove stale cart items whose product was deleted
+          or is no longer available.
+        */
+        const validItems = Array.isArray(loadedCart?.items)
+          ? loadedCart.items.filter(
+              (item) => item?.product
+            )
+          : [];
+
+        /*
+          If stale items were found, update the cart locally
+          so Checkout never tries to access product.price
+          when product is null.
+        */
+        if (
+          loadedCart &&
+          validItems.length !==
+            (loadedCart.items?.length || 0)
+        ) {
+          setCart({
+            ...loadedCart,
+            items: validItems,
+          });
+
+          setError(
+            "Some products in your cart are no longer available and have been removed."
+          );
+        } else {
+          setCart(loadedCart);
+        }
       } catch (error) {
         setError(error.message);
       } finally {
@@ -70,21 +102,41 @@ const [processingPayment, setProcessingPayment] = useState(false);
     loadCart();
   }, [navigate]);
 
-  const subtotal = useMemo(() => {
-    if (!cart?.items) return 0;
+  /*
+    Only calculate totals from valid products.
+  */
+  const validCartItems = useMemo(() => {
+    if (!cart?.items) return [];
 
-    return cart.items.reduce((total, item) => {
-      return total + item.product.price * item.quantity;
-    }, 0);
+    return cart.items.filter(
+      (item) => item?.product
+    );
   }, [cart]);
+
+  const subtotal = useMemo(() => {
+    return validCartItems.reduce(
+      (total, item) => {
+        return (
+          total +
+          Number(item.product.price || 0) *
+            Number(item.quantity || 0)
+        );
+      },
+      0
+    );
+  }, [validCartItems]);
 
   const totalItems = useMemo(() => {
-    if (!cart?.items) return 0;
-
-    return cart.items.reduce((total, item) => {
-      return total + item.quantity;
-    }, 0);
-  }, [cart]);
+    return validCartItems.reduce(
+      (total, item) => {
+        return (
+          total +
+          Number(item.quantity || 0)
+        );
+      },
+      0
+    );
+  }, [validCartItems]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -95,80 +147,107 @@ const [processingPayment, setProcessingPayment] = useState(false);
     }));
   };
 
- const handleContinue = async (event) => {
-  event.preventDefault();
+  const handleContinue = async (event) => {
+    event.preventDefault();
 
-  if (
-    !address.fullName.trim() ||
-    !address.phone.trim() ||
-    !address.address.trim() ||
-    !address.city.trim() ||
-    !address.state.trim()
-  ) {
-    setError("Please complete all delivery details.");
-    return;
-  }
-
-  try {
-    setProcessingPayment(true);
-    setError("");
-
-    /*
-      STEP 1:
-      Create the pending order.
-    */
-    const orderResponse = await apiFetch("/api/orders", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(address),
-});
-
-    const orderData = await orderResponse.json();
-
-    if (!orderResponse.ok) {
-      throw new Error(
-        orderData.message || "Unable to create order"
+    if (
+      !address.fullName.trim() ||
+      !address.phone.trim() ||
+      !address.address.trim() ||
+      !address.city.trim() ||
+      !address.state.trim()
+    ) {
+      setError(
+        "Please complete all delivery details."
       );
-    }
-
-    const orderId = orderData.order._id;
-
-    /*
-      STEP 2:
-      Ask our backend to initialize Paystack.
-    */
-   const paymentResponse = await apiFetch(`/api/orders/${orderId}/pay`, {
-  method: "POST",
-});
-
-    const paymentData = await paymentResponse.json();
-
-    if (!paymentResponse.ok) {
-      throw new Error(
-        paymentData.message ||
-          "Unable to initialize payment"
-      );
+      return;
     }
 
     /*
-      STEP 3:
-      Redirect customer to Paystack.
+      Do not attempt payment if there are no valid
+      products remaining in the cart.
     */
-    if (!paymentData.payment?.authorizationUrl) {
-      throw new Error(
-        "Paystack did not return a payment URL."
+    if (!validCartItems.length) {
+      setError(
+        "Your cart has no available products. Please return to your cart and add an available product."
       );
+      return;
     }
 
-    window.location.href =
-      paymentData.payment.authorizationUrl;
-  } catch (error) {
-    setError(error.message);
-    setProcessingPayment(false);
-  }
-};
+    try {
+      setProcessingPayment(true);
+      setError("");
+
+      /*
+        STEP 1:
+        Create the pending order.
+      */
+      const orderResponse = await apiFetch(
+        "/api/orders",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(address),
+        }
+      );
+
+      const orderData =
+        await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(
+          orderData.message ||
+            "Unable to create order"
+        );
+      }
+
+      const orderId =
+        orderData.order._id;
+
+      /*
+        STEP 2:
+        Ask our backend to initialize Paystack.
+      */
+      const paymentResponse =
+        await apiFetch(
+          `/api/orders/${orderId}/pay`,
+          {
+            method: "POST",
+          }
+        );
+
+      const paymentData =
+        await paymentResponse.json();
+
+      if (!paymentResponse.ok) {
+        throw new Error(
+          paymentData.message ||
+            "Unable to initialize payment"
+        );
+      }
+
+      /*
+        STEP 3:
+        Redirect customer to Paystack.
+      */
+      if (
+        !paymentData.payment
+          ?.authorizationUrl
+      ) {
+        throw new Error(
+          "Paystack did not return a payment URL."
+        );
+      }
+
+      window.location.href =
+        paymentData.payment.authorizationUrl;
+    } catch (error) {
+      setError(error.message);
+      setProcessingPayment(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -177,6 +256,7 @@ const [processingPayment, setProcessingPayment] = useState(false);
           <div className="flex min-h-[400px] items-center justify-center">
             <div className="text-center">
               <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900" />
+
               <p className="text-sm text-gray-500">
                 Loading your checkout...
               </p>
@@ -196,7 +276,9 @@ const [processingPayment, setProcessingPayment] = useState(false);
               Unable to load checkout
             </h1>
 
-            <p className="mt-2 text-sm text-red-600">{error}</p>
+            <p className="mt-2 text-sm text-red-600">
+              {error}
+            </p>
 
             <Link
               to="/cart"
@@ -211,7 +293,7 @@ const [processingPayment, setProcessingPayment] = useState(false);
     );
   }
 
-  if (!cart?.items?.length) {
+  if (!validCartItems.length) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
@@ -222,18 +304,20 @@ const [processingPayment, setProcessingPayment] = useState(false);
             />
 
             <h1 className="mt-5 text-2xl font-bold text-gray-900">
-              Your cart is empty
+              No available products
             </h1>
 
             <p className="mt-2 text-sm text-gray-500">
-              Add products to your cart before proceeding to checkout.
+              Products that are no longer available
+              have been removed from your checkout.
             </p>
 
             <Link
-              to="/products"
+              to="/cart"
               className="mt-7 inline-flex items-center gap-2 rounded-xl bg-gray-950 px-6 py-3 text-sm font-semibold text-white hover:bg-gray-800"
             >
-              Browse Products
+              <ArrowLeft size={17} />
+              Return to Cart
             </Link>
           </div>
         </div>
@@ -259,7 +343,8 @@ const [processingPayment, setProcessingPayment] = useState(false);
           </h1>
 
           <p className="mt-2 text-sm text-gray-500">
-            Review your order and provide your delivery details.
+            Review your order and provide your
+            delivery details.
           </p>
         </div>
 
@@ -283,13 +368,18 @@ const [processingPayment, setProcessingPayment] = useState(false);
                   <p className="text-sm font-semibold text-gray-950">
                     Delivery details
                   </p>
+
                   <p className="text-xs text-gray-500">
-                    Tell us where your order should be delivered
+                    Tell us where your order should
+                    be delivered
                   </p>
                 </div>
 
                 <div className="ml-auto">
-                  <CheckCircle size={20} className="text-green-600" />
+                  <CheckCircle
+                    size={20}
+                    className="text-green-600"
+                  />
                 </div>
               </div>
             </div>
@@ -301,7 +391,10 @@ const [processingPayment, setProcessingPayment] = useState(false);
             >
               <div className="flex items-center gap-3 border-b border-gray-100 pb-5">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100">
-                  <MapPin size={20} className="text-gray-800" />
+                  <MapPin
+                    size={20}
+                    className="text-gray-800"
+                  />
                 </div>
 
                 <div>
@@ -413,31 +506,34 @@ const [processingPayment, setProcessingPayment] = useState(false);
               </div>
 
               <button
-  type="submit"
-  disabled={processingPayment}
-  className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
->
-  {processingPayment ? (
-    <>
-      <LoaderCircle
-        size={18}
-        className="animate-spin"
-      />
-      Preparing payment...
-    </>
-  ) : (
-    <>
-      <CreditCard size={18} />
-      Continue to Payment
-    </>
-  )}
-</button>
+                type="submit"
+                disabled={processingPayment}
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {processingPayment ? (
+                  <>
+                    <LoaderCircle
+                      size={18}
+                      className="animate-spin"
+                    />
+                    Preparing payment...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard size={18} />
+                    Continue to Payment
+                  </>
+                )}
+              </button>
             </form>
 
             {/* Security */}
             <div className="flex gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100">
-                <ShieldCheck size={20} className="text-gray-800" />
+                <ShieldCheck
+                  size={20}
+                  className="text-gray-800"
+                />
               </div>
 
               <div>
@@ -446,8 +542,9 @@ const [processingPayment, setProcessingPayment] = useState(false);
                 </h3>
 
                 <p className="mt-1 text-xs leading-5 text-gray-500">
-                  Your payment will be processed securely. Vendora will
-                  verify payment before an order is confirmed.
+                  Your payment will be processed
+                  securely. Vendora will verify
+                  payment before an order is confirmed.
                 </p>
               </div>
             </div>
@@ -463,15 +560,20 @@ const [processingPayment, setProcessingPayment] = useState(false);
 
                 <p className="mt-1 text-xs text-gray-500">
                   {totalItems}{" "}
-                  {totalItems === 1 ? "item" : "items"}
+                  {totalItems === 1
+                    ? "item"
+                    : "items"}
                 </p>
               </div>
 
-              <CreditCard size={21} className="text-gray-500" />
+              <CreditCard
+                size={21}
+                className="text-gray-500"
+              />
             </div>
 
             <div className="mt-5 space-y-4">
-              {cart.items.map((item) => {
+              {validCartItems.map((item) => {
                 const product = item.product;
 
                 return (
@@ -508,7 +610,12 @@ const [processingPayment, setProcessingPayment] = useState(false);
                       <p className="mt-1 text-sm font-semibold text-gray-900">
                         ₦
                         {(
-                          product.price * item.quantity
+                          Number(
+                            product.price || 0
+                          ) *
+                          Number(
+                            item.quantity || 0
+                          )
                         ).toLocaleString()}
                       </p>
                     </div>
@@ -519,7 +626,9 @@ const [processingPayment, setProcessingPayment] = useState(false);
 
             <div className="mt-6 border-t border-gray-100 pt-5">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Subtotal</span>
+                <span className="text-gray-500">
+                  Subtotal
+                </span>
 
                 <span className="font-medium text-gray-900">
                   ₦{subtotal.toLocaleString()}
@@ -527,7 +636,9 @@ const [processingPayment, setProcessingPayment] = useState(false);
               </div>
 
               <div className="mt-3 flex items-center justify-between text-sm">
-                <span className="text-gray-500">Delivery</span>
+                <span className="text-gray-500">
+                  Delivery
+                </span>
 
                 <span className="font-medium text-gray-900">
                   Calculated later

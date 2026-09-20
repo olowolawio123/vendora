@@ -223,6 +223,61 @@ router.patch(
         });
       }
 
+      // =================================================
+      // SUSPEND / REACTIVATE SELLER
+      // =================================================
+      if (user.role === "seller") {
+        const seller = await Seller.findOne({
+          user: user._id,
+        });
+
+        if (seller) {
+          // ---------------------------------------------
+          // SUSPEND SELLER
+          // ---------------------------------------------
+          if (status === "suspended") {
+            const productUpdateResult =
+              await Product.updateMany(
+                {
+                  seller: seller._id,
+                  sellerSuspended: false,
+                },
+                {
+                  $set: {
+                    sellerSuspended: true,
+                  },
+                }
+              );
+
+            console.log(
+              `Hidden ${productUpdateResult.modifiedCount} products belonging to suspended seller ${seller._id}`
+            );
+          }
+
+          // ---------------------------------------------
+          // REACTIVATE SELLER
+          // ---------------------------------------------
+          if (status === "active") {
+            const productUpdateResult =
+              await Product.updateMany(
+                {
+                  seller: seller._id,
+                  sellerSuspended: true,
+                },
+                {
+                  $set: {
+                    sellerSuspended: false,
+                  },
+                }
+              );
+
+            console.log(
+              `Restored ${productUpdateResult.modifiedCount} products belonging to reactivated seller ${seller._id}`
+            );
+          }
+        }
+      }
+
       user.status = status;
 
       await user.save();
@@ -287,6 +342,33 @@ router.delete(
         });
       }
 
+      // =================================================
+      // DELETE SELLER'S PRODUCTS AND SELLER PROFILE
+      // =================================================
+      if (user.role === "seller") {
+        const seller = await Seller.findOne({
+          user: user._id,
+        });
+
+        if (seller) {
+          const productDeleteResult =
+            await Product.deleteMany({
+              seller: seller._id,
+            });
+
+          console.log(
+            `Deleted ${productDeleteResult.deletedCount} products belonging to deleted seller ${seller._id}`
+          );
+
+          await Seller.findByIdAndDelete(
+            seller._id
+          );
+        }
+      }
+
+      // =================================================
+      // DELETE USER
+      // =================================================
       await User.findByIdAndDelete(
         req.params.userId
       );

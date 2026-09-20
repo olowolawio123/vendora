@@ -185,9 +185,6 @@ router.post(
         });
       }
 
-      /*
-        Resolve the bank account through Paystack.
-      */
       const resolveUrl =
         `https://api.paystack.co/bank/resolve` +
         `?account_number=${encodeURIComponent(
@@ -238,13 +235,6 @@ router.post(
         });
       }
 
-      /*
-        Create a Paystack transfer recipient.
-
-        We use the verified account name returned
-        by Paystack rather than trusting a name
-        supplied by the seller.
-      */
       const recipientResponse =
         await fetch(
           "https://api.paystack.co/transferrecipient",
@@ -292,10 +282,6 @@ router.post(
       const recipient =
         recipientData.data;
 
-      /*
-        Save only the information Vendora
-        needs for future payouts.
-      */
       seller.payout = {
         bankCode: cleanBankCode,
 
@@ -359,8 +345,6 @@ router.post(
   }
 );
 
-
-
 /*
   SELLER WITHDRAWAL - BALANCE
 
@@ -385,21 +369,21 @@ router.get(
       }
 
       const availableEarnings =
-  await SellerEarning.find({
-    seller: seller._id,
-    status: {
-      $in: [
-        "available",
-        "withdrawal_pending",
-      ],
-    },
-  });
+        await SellerEarning.find({
+          seller: seller._id,
+          status: {
+            $in: [
+              "available",
+              "withdrawal_pending",
+            ],
+          },
+        });
 
-const pendingEarnings =
-  await SellerEarning.find({
-    seller: seller._id,
-    status: "withdrawal_pending",
-  });
+      const pendingEarnings =
+        await SellerEarning.find({
+          seller: seller._id,
+          status: "withdrawal_pending",
+        });
 
       const withdrawnEarnings =
         await SellerEarning.find({
@@ -408,33 +392,43 @@ const pendingEarnings =
         });
 
       const availableAmount =
-  availableEarnings.reduce(
-    (total, earning) =>
-      total +
-      Math.max(
-        0,
-        Number(earning.netAmount || 0) -
-          Number(earning.withdrawnAmount || 0) -
-          Number(earning.reservedAmount || 0)
-      ),
-    0
-  );
+        availableEarnings.reduce(
+          (total, earning) =>
+            total +
+            Math.max(
+              0,
+              Number(
+                earning.netAmount || 0
+              ) -
+                Number(
+                  earning.withdrawnAmount || 0
+                ) -
+                Number(
+                  earning.reservedAmount || 0
+                )
+            ),
+          0
+        );
 
-const pendingWithdrawalAmount =
-  pendingEarnings.reduce(
-    (total, earning) =>
-      total +
-      Number(earning.reservedAmount || 0),
-    0
-  );
+      const pendingWithdrawalAmount =
+        pendingEarnings.reduce(
+          (total, earning) =>
+            total +
+            Number(
+              earning.reservedAmount || 0
+            ),
+          0
+        );
 
-const withdrawnAmount =
-  withdrawnEarnings.reduce(
-    (total, earning) =>
-      total +
-      Number(earning.withdrawnAmount || 0),
-    0
-  );
+      const withdrawnAmount =
+        withdrawnEarnings.reduce(
+          (total, earning) =>
+            total +
+            Number(
+              earning.withdrawnAmount || 0
+            ),
+          0
+        );
 
       const pendingWithdrawals =
         await Withdrawal.find({
@@ -453,20 +447,34 @@ const withdrawnAmount =
         success: true,
 
         balance: {
-          available: availableAmount,
+          available:
+            Math.round(
+              availableAmount * 100
+            ) / 100,
+
           pendingWithdrawal:
-            pendingWithdrawalAmount,
-          withdrawn: withdrawnAmount,
+            Math.round(
+              pendingWithdrawalAmount * 100
+            ) / 100,
+
+          withdrawn:
+            Math.round(
+              withdrawnAmount * 100
+            ) / 100,
+
           currency: "NGN",
         },
 
         payout: {
           bankName:
             seller.payout?.bankName || "",
+
           accountNumber:
             seller.payout?.accountNumber || "",
+
           accountName:
             seller.payout?.accountName || "",
+
           verified:
             seller.payout?.verified || false,
         },
@@ -487,7 +495,6 @@ const withdrawnAmount =
     }
   }
 );
-
 
 /*
   SELLER WITHDRAWAL - HISTORY
@@ -540,7 +547,6 @@ router.get(
   }
 );
 
-
 /*
   SELLER WITHDRAWAL - REQUEST WITHDRAWAL
 
@@ -550,7 +556,8 @@ router.post(
   "/seller-withdrawal/request",
   protect,
   async (req, res) => {
-    const session = await mongoose.startSession();
+    const session =
+      await mongoose.startSession();
 
     try {
       const seller = await Seller.findOne({
@@ -577,15 +584,6 @@ router.post(
         });
       }
 
-      /*
-        Optional withdrawal amount.
-
-        If amount is not supplied, the seller can
-        withdraw the full available balance.
-
-        If amount is supplied, only that amount
-        will be reserved.
-      */
       const requestedAmount =
         req.body?.amount !== undefined
           ? Number(req.body.amount)
@@ -593,7 +591,9 @@ router.post(
 
       if (
         requestedAmount !== null &&
-        (!Number.isFinite(requestedAmount) ||
+        (!Number.isFinite(
+          requestedAmount
+        ) ||
           requestedAmount <= 0)
       ) {
         return res.status(400).json({
@@ -605,239 +605,199 @@ router.post(
 
       let withdrawalResult = null;
 
-      await session.withTransaction(async () => {
-        /*
-          Find earnings that are available and have
-          money that has not already been withdrawn
-          or reserved for another withdrawal.
-        */
-        const availableEarnings =
-          await SellerEarning.find({
-            seller: seller._id,
-            status: "available",
-          })
-            .sort({
-              createdAt: 1,
+      await session.withTransaction(
+        async () => {
+          const availableEarnings =
+            await SellerEarning.find({
+              seller: seller._id,
+              status: "available",
             })
-            .session(session);
+              .sort({
+                createdAt: 1,
+              })
+              .session(session);
 
-        if (!availableEarnings.length) {
-          throw new Error(
-            "NO_AVAILABLE_EARNINGS"
-          );
-        }
+          if (!availableEarnings.length) {
+            throw new Error(
+              "NO_AVAILABLE_EARNINGS"
+            );
+          }
 
-        /*
-          Calculate the true available amount:
+          const availableAmount =
+            availableEarnings.reduce(
+              (total, earning) =>
+                total +
+                Math.max(
+                  0,
+                  Number(
+                    earning.netAmount || 0
+                  ) -
+                    Number(
+                      earning.withdrawnAmount ||
+                        0
+                    ) -
+                    Number(
+                      earning.reservedAmount ||
+                        0
+                    )
+                ),
+              0
+            );
 
-          netAmount
-          - withdrawnAmount
-          - reservedAmount
-        */
-        const availableAmount =
-          availableEarnings.reduce(
-            (total, earning) =>
-              total +
+          if (availableAmount <= 0) {
+            throw new Error(
+              "NO_AVAILABLE_EARNINGS"
+            );
+          }
+
+          const existingWithdrawal =
+            await Withdrawal.findOne({
+              seller: seller._id,
+              status: {
+                $in: [
+                  "pending",
+                  "processing",
+                ],
+              },
+            }).session(session);
+
+          if (existingWithdrawal) {
+            throw new Error(
+              "WITHDRAWAL_ALREADY_PENDING"
+            );
+          }
+
+          const withdrawalAmount =
+            requestedAmount === null
+              ? availableAmount
+              : requestedAmount;
+
+          if (
+            withdrawalAmount >
+            availableAmount
+          ) {
+            throw new Error(
+              "INSUFFICIENT_AVAILABLE_BALANCE"
+            );
+          }
+
+          const finalWithdrawalAmount =
+            Math.round(
+              withdrawalAmount * 100
+            ) / 100;
+
+          if (
+            finalWithdrawalAmount <= 0
+          ) {
+            throw new Error(
+              "NO_AVAILABLE_EARNINGS"
+            );
+          }
+
+          const withdrawal =
+            new Withdrawal({
+              seller: seller._id,
+
+              amount:
+                finalWithdrawalAmount,
+
+              currency: "NGN",
+
+              status: "pending",
+
+              recipientCode:
+                seller.payout
+                  .paystackRecipientCode,
+
+              bankCode:
+                seller.payout.bankCode,
+
+              bankName:
+                seller.payout.bankName,
+
+              accountNumber:
+                seller.payout.accountNumber,
+
+              accountName:
+                seller.payout.accountName,
+
+              reason:
+                "Seller earnings withdrawal",
+            });
+
+          await withdrawal.save({
+            session,
+          });
+
+          let remainingAmount =
+            finalWithdrawalAmount;
+
+          for (
+            const earning of availableEarnings
+          ) {
+            if (remainingAmount <= 0) {
+              break;
+            }
+
+            const earningAvailable =
               Math.max(
                 0,
                 Number(
                   earning.netAmount || 0
                 ) -
                   Number(
-                    earning.withdrawnAmount || 0
+                    earning.withdrawnAmount ||
+                      0
                   ) -
                   Number(
-                    earning.reservedAmount || 0
+                    earning.reservedAmount ||
+                      0
                   )
-              ),
-            0
-          );
+              );
 
-        if (availableAmount <= 0) {
-          throw new Error(
-            "NO_AVAILABLE_EARNINGS"
-          );
-        }
+            if (earningAvailable <= 0) {
+              continue;
+            }
 
-        /*
-          Prevent multiple active withdrawals
-          for the same seller.
-        */
-        const existingWithdrawal =
-          await Withdrawal.findOne({
-            seller: seller._id,
-            status: {
-              $in: [
-                "pending",
-                "processing",
-              ],
-            },
-          }).session(session);
+            const amountToReserve =
+              Math.min(
+                earningAvailable,
+                remainingAmount
+              );
 
-        if (existingWithdrawal) {
-          throw new Error(
-            "WITHDRAWAL_ALREADY_PENDING"
-          );
-        }
-
-        /*
-          If the seller supplied an amount, use it.
-
-          Otherwise withdraw the entire available
-          balance.
-        */
-        const withdrawalAmount =
-          requestedAmount === null
-            ? availableAmount
-            : requestedAmount;
-
-        /*
-          Protect against withdrawing more than
-          the seller actually has available.
-        */
-        if (
-          withdrawalAmount >
-          availableAmount
-        ) {
-          throw new Error(
-            "INSUFFICIENT_AVAILABLE_BALANCE"
-          );
-        }
-
-        /*
-          Keep money calculations at two decimal
-          places.
-        */
-        const finalWithdrawalAmount =
-          Math.round(
-            withdrawalAmount * 100
-          ) / 100;
-
-        if (
-          finalWithdrawalAmount <= 0
-        ) {
-          throw new Error(
-            "NO_AVAILABLE_EARNINGS"
-          );
-        }
-
-        /*
-          Create the withdrawal first.
-        */
-        const withdrawal =
-          new Withdrawal({
-            seller: seller._id,
-
-            amount:
-              finalWithdrawalAmount,
-
-            currency: "NGN",
-
-            status: "pending",
-
-            recipientCode:
-              seller.payout
-                .paystackRecipientCode,
-
-            bankCode:
-              seller.payout.bankCode,
-
-            bankName:
-              seller.payout.bankName,
-
-            accountNumber:
-              seller.payout.accountNumber,
-
-            accountName:
-              seller.payout.accountName,
-
-            reason:
-              "Seller earnings withdrawal",
-          });
-
-        await withdrawal.save({
-          session,
-        });
-
-        /*
-          Reserve the requested amount from the
-          oldest available earnings first.
-
-          This is important because it lets us
-          support partial withdrawals safely.
-        */
-        let remainingAmount =
-          finalWithdrawalAmount;
-
-        for (
-          const earning of availableEarnings
-        ) {
-          if (remainingAmount <= 0) {
-            break;
-          }
-
-          const earningAvailable =
-            Math.max(
-              0,
+            earning.reservedAmount =
               Number(
-                earning.netAmount || 0
-              ) -
-                Number(
-                  earning.withdrawnAmount ||
-                    0
-                ) -
-                Number(
-                  earning.reservedAmount ||
-                    0
-                )
-            );
+                earning.reservedAmount || 0
+              ) + amountToReserve;
 
-          if (earningAvailable <= 0) {
-            continue;
+            earning.status =
+              "withdrawal_pending";
+
+            earning.withdrawal =
+              withdrawal._id;
+
+            await earning.save({
+              session,
+            });
+
+            remainingAmount =
+              Math.round(
+                (remainingAmount -
+                  amountToReserve) *
+                  100
+              ) / 100;
           }
 
-          const amountToReserve =
-            Math.min(
-              earningAvailable,
-              remainingAmount
+          if (remainingAmount > 0) {
+            throw new Error(
+              "WITHDRAWAL_RESERVATION_FAILED"
             );
+          }
 
-          earning.reservedAmount =
-            Number(
-              earning.reservedAmount || 0
-            ) + amountToReserve;
-
-          earning.status =
-            "withdrawal_pending";
-
-          earning.withdrawal =
-            withdrawal._id;
-
-          await earning.save({
-            session,
-          });
-
-          remainingAmount =
-            Math.round(
-              (remainingAmount -
-                amountToReserve) *
-                100
-            ) / 100;
+          withdrawalResult =
+            withdrawal;
         }
-
-        /*
-          This should never happen because we
-          already checked the available balance.
-        */
-        if (remainingAmount > 0) {
-          throw new Error(
-            "WITHDRAWAL_RESERVATION_FAILED"
-          );
-        }
-
-        withdrawalResult =
-          withdrawal;
-      });
+      );
 
       return res.status(201).json({
         success: true,
@@ -932,7 +892,6 @@ router.post(
   }
 );
 
-
 /*
   SELLER WITHDRAWAL - CANCEL PENDING WITHDRAWAL
 
@@ -942,7 +901,8 @@ router.post(
   "/seller-withdrawal/cancel",
   protect,
   async (req, res) => {
-    const session = await mongoose.startSession();
+    const session =
+      await mongoose.startSession();
 
     try {
       const seller = await Seller.findOne({
@@ -960,65 +920,63 @@ router.post(
 
       let cancelledWithdrawal = null;
 
-      await session.withTransaction(async () => {
-        const withdrawal =
-          await Withdrawal.findOne({
-            seller: seller._id,
-            status: "pending",
-          })
-            .sort({
-              createdAt: -1,
+      await session.withTransaction(
+        async () => {
+          const withdrawal =
+            await Withdrawal.findOne({
+              seller: seller._id,
+              status: "pending",
             })
-            .session(session);
+              .sort({
+                createdAt: -1,
+              })
+              .session(session);
 
-        if (!withdrawal) {
-          throw new Error(
-            "NO_PENDING_WITHDRAWAL"
-          );
-        }
+          if (!withdrawal) {
+            throw new Error(
+              "NO_PENDING_WITHDRAWAL"
+            );
+          }
 
-        /*
-          Release the money reserved for this
-          withdrawal.
-        */
-        const earnings =
-          await SellerEarning.find({
-            seller: seller._id,
-            withdrawal: withdrawal._id,
-            status: "withdrawal_pending",
-          }).session(session);
+          const earnings =
+            await SellerEarning.find({
+              seller: seller._id,
+              withdrawal:
+                withdrawal._id,
+              status:
+                "withdrawal_pending",
+            }).session(session);
 
-        for (const earning of earnings) {
-          earning.reservedAmount = 0;
+          for (const earning of earnings) {
+            earning.reservedAmount = 0;
 
-          earning.withdrawal = null;
+            earning.withdrawal = null;
 
-          earning.status = "available";
+            earning.status = "available";
 
-          await earning.save({
+            await earning.save({
+              session,
+            });
+          }
+
+          withdrawal.status =
+            "cancelled";
+
+          withdrawal.failureReason =
+            withdrawal.failureReason ||
+            "Withdrawal cancelled";
+
+          withdrawal.failedAt =
+            new Date();
+
+          await withdrawal.save({
             session,
           });
+
+          cancelledWithdrawal =
+            withdrawal;
         }
-
-        /*
-          Keep the withdrawal record for the
-          financial audit trail.
-        */
-        withdrawal.status = "cancelled";
-
-        withdrawal.failureReason =
-          withdrawal.failureReason ||
-          "Withdrawal cancelled";
-
-        withdrawal.failedAt = new Date();
-
-        await withdrawal.save({
-          session,
-        });
-
-        cancelledWithdrawal =
-          withdrawal;
-      });
+      );
 
       return res.json({
         success: true,
@@ -1079,11 +1037,6 @@ router.post(
 
   POST /api/orders/seller-withdrawal/process
 */
-/*
-  SELLER WITHDRAWAL - PROCESS TEST/REAL TRANSFER
-
-  POST /api/orders/seller-withdrawal/process
-*/
 router.post(
   "/seller-withdrawal/process",
   protect,
@@ -1102,9 +1055,6 @@ router.post(
         });
       }
 
-      /*
-        Find the seller's pending withdrawal.
-      */
       const withdrawal =
         await Withdrawal.findOne({
           seller: seller._id,
@@ -1121,24 +1071,24 @@ router.post(
         });
       }
 
-      /*
-        Find ONLY the earnings reserved
-        for this withdrawal.
-      */
       const withdrawalEarnings =
         await SellerEarning.find({
           seller: seller._id,
-          withdrawal: withdrawal._id,
-          status: "withdrawal_pending",
+          withdrawal:
+            withdrawal._id,
+          status:
+            "withdrawal_pending",
         });
 
       if (!withdrawalEarnings.length) {
-        withdrawal.status = "cancelled";
+        withdrawal.status =
+          "cancelled";
 
         withdrawal.failureReason =
           "No reserved earnings found for this withdrawal";
 
-        withdrawal.failedAt = new Date();
+        withdrawal.failedAt =
+          new Date();
 
         await withdrawal.save();
 
@@ -1149,10 +1099,6 @@ router.post(
         });
       }
 
-      /*
-        Calculate the exact amount reserved
-        for this withdrawal.
-      */
       const reservedAmount =
         withdrawalEarnings.reduce(
           (total, earning) =>
@@ -1165,8 +1111,12 @@ router.post(
 
       if (
         reservedAmount <= 0 ||
-        Math.round(reservedAmount * 100) !==
-          Math.round(withdrawal.amount * 100)
+        Math.round(
+          reservedAmount * 100
+        ) !==
+          Math.round(
+            withdrawal.amount * 100
+          )
       ) {
         return res.status(400).json({
           success: false,
@@ -1175,11 +1125,8 @@ router.post(
         });
       }
 
-      /*
-        Move withdrawal into processing
-        before calling Paystack.
-      */
-      withdrawal.status = "processing";
+      withdrawal.status =
+        "processing";
 
       await withdrawal.save();
 
@@ -1194,7 +1141,8 @@ router.post(
       try {
         transferResult =
           await createTransfer({
-            amount: withdrawal.amount,
+            amount:
+              withdrawal.amount,
 
             recipientCode:
               withdrawal.recipientCode,
@@ -1207,41 +1155,21 @@ router.post(
               "Vendora seller withdrawal",
           });
       } catch (transferError) {
-        /*
-          Paystack transfer failed.
-
-          Release ONLY the amount reserved
-          for this withdrawal.
-        */
         for (
           const earning of withdrawalEarnings
         ) {
-          earning.reservedAmount = Math.max(
-            0,
-            Number(
-              earning.reservedAmount || 0
-            )
-          );
-
-          /*
-            The reserved amount belongs to
-            this withdrawal. Release it.
-          */
           earning.reservedAmount = 0;
 
           earning.withdrawal = null;
 
-          /*
-            If nothing has been withdrawn
-            from this earning, return it
-            to available status.
-          */
-          earning.status = "available";
+          earning.status =
+            "available";
 
           await earning.save();
         }
 
-        withdrawal.status = "failed";
+        withdrawal.status =
+          "failed";
 
         withdrawal.failureReason =
           transferError.message ||
@@ -1250,20 +1178,24 @@ router.post(
         withdrawal.transferReference =
           transferReference;
 
-        withdrawal.failedAt = new Date();
+        withdrawal.failedAt =
+          new Date();
 
-        withdrawal.processedAt = new Date();
+        withdrawal.processedAt =
+          new Date();
 
         await withdrawal.save();
 
         return res.status(400).json({
           success: false,
+
           message:
             transferError.message ||
             "Paystack transfer failed",
 
           withdrawal: {
-            id: withdrawal._id,
+            id:
+              withdrawal._id,
 
             amount:
               withdrawal.amount,
@@ -1296,22 +1228,16 @@ router.post(
       withdrawal.processedAt =
         new Date();
 
-      /*
-        Paystack may return different statuses.
-        Only finalize the earning when the
-        transfer itself is successful.
-      */
       if (
-        transferData.status === "success"
+        transferData.status ===
+        "success"
       ) {
-        withdrawal.status = "successful";
+        withdrawal.status =
+          "successful";
 
         withdrawal.completedAt =
           new Date();
 
-        /*
-          Finalize ONLY the reserved amount.
-        */
         for (
           const earning of withdrawalEarnings
         ) {
@@ -1329,16 +1255,12 @@ router.post(
               earning.withdrawnAmount || 0
             ) + reserved;
 
-          earning.reservedAmount = 0;
+          earning.reservedAmount =
+            0;
 
           earning.withdrawal =
             withdrawal._id;
 
-          /*
-            If the entire earning has now
-            been withdrawn, mark it withdrawn.
-            Otherwise keep it available.
-          */
           const remainingAmount =
             Math.max(
               0,
@@ -1352,21 +1274,16 @@ router.post(
             );
 
           if (remainingAmount > 0) {
-            earning.status = "available";
+            earning.status =
+              "available";
           } else {
-            earning.status = "withdrawn";
+            earning.status =
+              "withdrawn";
           }
 
           await earning.save();
         }
       } else {
-        /*
-          Transfer was accepted but is not
-          yet successful.
-
-          Keep the withdrawal processing and
-          keep the earnings reserved.
-        */
         withdrawal.status =
           "processing";
       }
@@ -1433,14 +1350,16 @@ router.post(
 );
 
 const generateOrderNumber = () => {
-  const timestamp = Date.now()
-    .toString()
-    .slice(-8);
+  const timestamp =
+    Date.now()
+      .toString()
+      .slice(-8);
 
-  const random = crypto
-    .randomBytes(2)
-    .toString("hex")
-    .toUpperCase();
+  const random =
+    crypto
+      .randomBytes(2)
+      .toString("hex")
+      .toUpperCase();
 
   return `VND-${timestamp}-${random}`;
 };
@@ -1450,175 +1369,397 @@ const generateOrderNumber = () => {
 
   POST /api/orders
 */
-router.post("/", protect, async (req, res) => {
-  try {
-    const {
-      fullName,
-      phone,
-      address,
-      city,
-      state,
-    } = req.body;
-
-    if (
-      !fullName ||
-      !phone ||
-      !address ||
-      !city ||
-      !state
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Complete delivery information is required",
-      });
-    }
-
-    const cart = await Cart.findOne({
-      user: req.user.userId,
-    }).populate({
-      path: "items.product",
-      populate: {
-        path: "seller",
-        select: "storeName location rating",
-      },
-    });
-
-    if (!cart || !cart.items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Your cart is empty",
-      });
-    }
-
-    const orderItems = [];
-    let subtotal = 0;
-
-    for (const cartItem of cart.items) {
-      const product = await Product.findOne({
-        _id: cartItem.product._id,
-        status: "active",
-      }).populate(
-        "seller",
-        "storeName location rating"
-      );
-
-      if (!product) {
-        return res.status(400).json({
-          success: false,
-          message: `The product "${cartItem.product.title}" is no longer available`,
-        });
-      }
-
-      if (product.stock < cartItem.quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Only ${product.stock} item${
-            product.stock === 1 ? "" : "s"
-          } of "${product.title}" are available`,
-        });
-      }
-
-      const itemSubtotal =
-        product.price * cartItem.quantity;
-
-      subtotal += itemSubtotal;
-
-      orderItems.push({
-        product: product._id,
-        seller: product.seller._id,
-        title: product.title,
-        image: product.images?.[0] || "",
-        quantity: cartItem.quantity,
-        price: product.price,
-        subtotal: itemSubtotal,
-      });
-    }
-
-    const deliveryFee = 0;
-
-    const total = subtotal + deliveryFee;
-
-    const order = await Order.create({
-      orderNumber: generateOrderNumber(),
-      buyer: req.user.userId,
-      items: orderItems,
-
-      deliveryAddress: {
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        address: address.trim(),
-        city: city.trim(),
-        state: state.trim(),
-      },
-
-      subtotal,
-      deliveryFee,
-      total,
-
-      paymentStatus: "pending",
-      orderStatus: "pending",
-    });
-
-    await Notification.create({
-      user: req.user.userId,
-      type: "order_placed",
-      title: "Order placed successfully",
-      message: `Your order ${order.orderNumber} has been placed successfully.`,
-      order: order._id,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Order created successfully",
-      order,
-    });
-  } catch (error) {
-    console.error(
-      "Create order error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      message: "Unable to create order",
-    });
-  }
-});
-
-/*
-  GET MY ORDERS
-
-  GET /api/orders/my-orders
-*/
-router.get(
-  "/my-orders",
+router.post(
+  "/",
   protect,
   async (req, res) => {
     try {
-      const orders = await Order.find({
-        buyer: req.user.userId,
-      })
-        .sort({ createdAt: -1 })
-        .populate(
-          "items.seller",
-          "storeName location rating"
-        );
+      const {
+        fullName,
+        phone,
+        address,
+        city,
+        state,
+      } = req.body;
 
-      res.json({
+      if (
+        !fullName ||
+        !phone ||
+        !address ||
+        !city ||
+        !state
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Complete delivery information is required",
+        });
+      }
+
+      /*
+        Load the raw cart first.
+
+        This allows us to detect products that were
+        completely deleted from MongoDB after they
+        were added to the buyer's cart.
+      */
+      const rawCart =
+        await Cart.findOne({
+          user: req.user.userId,
+        });
+
+      if (
+        !rawCart ||
+        !rawCart.items.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Your cart is empty",
+        });
+      }
+
+      /*
+        Remove cart items whose products no longer
+        exist at all.
+      */
+      const staleProductIds = [];
+
+      for (
+        const cartItem of rawCart.items
+      ) {
+        if (!cartItem.product) {
+          continue;
+        }
+
+        const productExists =
+          await Product.exists({
+            _id: cartItem.product,
+          });
+
+        if (!productExists) {
+          staleProductIds.push(
+            cartItem.product
+          );
+        }
+      }
+
+      if (
+        staleProductIds.length > 0
+      ) {
+        await Cart.updateOne(
+          {
+            user:
+              req.user.userId,
+          },
+          {
+            $pull: {
+              items: {
+                product: {
+                  $in:
+                    staleProductIds,
+                },
+              },
+            },
+          }
+        );
+      }
+
+      /*
+        Reload the cart after stale products
+        have been removed.
+      */
+      const cart =
+        await Cart.findOne({
+          user: req.user.userId,
+        }).populate({
+          path: "items.product",
+          populate: {
+            path: "seller",
+            select:
+              "storeName location rating status user",
+            populate: {
+              path: "user",
+              select: "status",
+            },
+          },
+        });
+
+      if (
+        !cart ||
+        !cart.items.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "All products in your cart are no longer available. Please return to your cart and add available products.",
+        });
+      }
+
+      const orderItems = [];
+
+      let subtotal = 0;
+
+      for (
+        const cartItem of cart.items
+      ) {
+        /*
+          Never access product properties
+          before checking that the product exists.
+        */
+        if (!cartItem.product) {
+          continue;
+        }
+
+        /*
+          Reload the product directly so we check
+          the current status instead of relying only
+          on the populated cart snapshot.
+        */
+        const product =
+          await Product.findOne({
+            _id:
+              cartItem.product._id,
+
+            status: "active",
+          }).populate({
+            path: "seller",
+            select:
+              "storeName location rating status user",
+
+            populate: {
+              path: "user",
+              select: "status",
+            },
+          });
+
+        if (!product) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "One or more products in your cart are no longer available. Please return to your cart.",
+          });
+        }
+
+        if (!product.seller) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "One of the products in your cart is no longer available.",
+          });
+        }
+
+        /*
+          Seller must still be approved.
+        */
+        if (
+          product.seller.status !==
+          "approved"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `"${product.title}" is no longer available for purchase.`,
+          });
+        }
+
+        /*
+          The seller's User account must also
+          still be active.
+        */
+        if (
+          !product.seller.user ||
+          product.seller.user.status !==
+            "active"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `"${product.title}" is no longer available for purchase.`,
+          });
+        }
+
+        /*
+          Validate quantity.
+        */
+        const quantity =
+          Number(
+            cartItem.quantity
+          );
+
+        if (
+          !Number.isInteger(
+            quantity
+          ) ||
+          quantity <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `Invalid quantity for "${product.title}".`,
+          });
+        }
+
+        /*
+          Validate current stock.
+        */
+        if (
+          product.stock <
+          quantity
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `Only ${product.stock} item${
+                product.stock === 1
+                  ? ""
+                  : "s"
+              } of "${product.title}" are available`,
+          });
+        }
+
+        const itemSubtotal =
+          Number(product.price) *
+          quantity;
+
+        subtotal += itemSubtotal;
+
+        orderItems.push({
+          product:
+            product._id,
+
+          seller:
+            product.seller._id,
+
+          title:
+            product.title,
+
+          image:
+            product.images?.[0] ||
+            "",
+
+          quantity,
+
+          price:
+            Number(product.price),
+
+          subtotal:
+            itemSubtotal,
+        });
+      }
+
+      if (
+        !orderItems.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "All products in your cart are no longer available. Please return to your cart and add available products.",
+        });
+      }
+
+      const deliveryFee = 0;
+
+      const total =
+        subtotal +
+        deliveryFee;
+
+      const order =
+        await Order.create({
+          orderNumber:
+            generateOrderNumber(),
+
+          buyer:
+            req.user.userId,
+
+          items:
+            orderItems,
+
+          deliveryAddress: {
+            fullName:
+              String(
+                fullName
+              ).trim(),
+
+            phone:
+              String(
+                phone
+              ).trim(),
+
+            address:
+              String(
+                address
+              ).trim(),
+
+            city:
+              String(
+                city
+              ).trim(),
+
+            state:
+              String(
+                state
+              ).trim(),
+          },
+
+          subtotal,
+
+          deliveryFee,
+
+          total,
+
+          paymentStatus:
+            "pending",
+
+          orderStatus:
+            "pending",
+        });
+
+      /*
+        Notification failure must never make
+        an already-created order look like it failed.
+      */
+      try {
+        await Notification.create({
+          user:
+            req.user.userId,
+
+          type:
+            "order_placed",
+
+          title:
+            "Order placed successfully",
+
+          message:
+            `Your order ${order.orderNumber} has been placed successfully.`,
+
+          order:
+            order._id,
+        });
+      } catch (notificationError) {
+        console.error(
+          "Order notification creation error:",
+          notificationError
+        );
+      }
+
+      return res.status(201).json({
         success: true,
-        count: orders.length,
-        orders,
+
+        message:
+          "Order created successfully",
+
+        order,
       });
     } catch (error) {
       console.error(
-        "Get my orders error:",
-        error.message
+        "Create order error:",
+        error
       );
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        message: "Unable to load your orders",
+        message:
+          "Unable to create order",
       });
     }
   }
@@ -1627,11 +1768,10 @@ router.get(
 /*
   SELLER DASHBOARD
 
-  IMPORTANT:
-  This route is deliberately placed BEFORE
-  every /:orderId route.
-
   GET /api/orders/seller-dashboard
+
+  IMPORTANT:
+  This route is before /:orderId.
 */
 router.get(
   "/seller-dashboard",
@@ -1643,10 +1783,14 @@ router.get(
         req.user.userId
       );
 
-      const seller = await Seller.findOne({
-        user: req.user.userId,
-        status: "approved",
-      });
+      const seller =
+        await Seller.findOne({
+          user:
+            req.user.userId,
+
+          status:
+            "approved",
+        });
 
       if (!seller) {
         return res.status(403).json({
@@ -1661,67 +1805,93 @@ router.get(
         seller._id.toString()
       );
 
-      const orders = await Order.find({
-        "items.seller": seller._id,
-      }).sort({
-        createdAt: -1,
-      });
+      const orders =
+        await Order.find({
+          "items.seller":
+            seller._id,
+        }).sort({
+          createdAt: -1,
+        });
 
       let totalSales = 0;
 
-      const recentOrders = orders.map(
-        (order) => {
-          const sellerItems =
-            order.items.filter(
-              (item) =>
-                item.seller &&
-                item.seller.toString() ===
-                  seller._id.toString()
-            );
+      const recentOrders =
+        orders.map(
+          (order) => {
+            const sellerItems =
+              order.items.filter(
+                (item) =>
+                  item.seller &&
+                  item.seller.toString() ===
+                    seller._id.toString()
+              );
 
-          const sellerOrderTotal =
-            sellerItems.reduce(
-              (sum, item) =>
-                sum +
-                Number(item.subtotal || 0),
-              0
-            );
+            const sellerOrderTotal =
+              sellerItems.reduce(
+                (sum, item) =>
+                  sum +
+                  Number(
+                    item.subtotal ||
+                      0
+                  ),
+                0
+              );
 
-          if (
-            order.paymentStatus === "paid"
-          ) {
-            totalSales +=
-              sellerOrderTotal;
+            if (
+              order.paymentStatus ===
+              "paid"
+            ) {
+              totalSales +=
+                sellerOrderTotal;
+            }
+
+            return {
+              id:
+                order._id,
+
+              orderNumber:
+                order.orderNumber,
+
+              buyer:
+                order.buyer,
+
+              total:
+                sellerOrderTotal,
+
+              paymentStatus:
+                order.paymentStatus,
+
+              orderStatus:
+                order.orderStatus,
+
+              createdAt:
+                order.createdAt,
+
+              items:
+                sellerItems,
+            };
           }
-
-          return {
-            id: order._id,
-            orderNumber:
-              order.orderNumber,
-            buyer: order.buyer,
-            total: sellerOrderTotal,
-            paymentStatus:
-              order.paymentStatus,
-            orderStatus:
-              order.orderStatus,
-            createdAt:
-              order.createdAt,
-            items: sellerItems,
-          };
-        }
-      );
+        );
 
       return res.json({
         success: true,
 
         stats: {
-          orders: orders.length,
-          sales: totalSales,
-          rating: seller.rating || 0,
+          orders:
+            orders.length,
+
+          sales:
+            totalSales,
+
+          rating:
+            seller.rating || 0,
         },
 
         recentOrders:
-          recentOrders.slice(0, 5),
+          recentOrders.slice(
+            0,
+            5
+          ),
       });
     } catch (error) {
       console.error(
@@ -1748,10 +1918,14 @@ router.get(
   protect,
   async (req, res) => {
     try {
-      const seller = await Seller.findOne({
-        user: req.user.userId,
-        status: "approved",
-      });
+      const seller =
+        await Seller.findOne({
+          user:
+            req.user.userId,
+
+          status:
+            "approved",
+        });
 
       if (!seller) {
         return res.status(403).json({
@@ -1761,43 +1935,80 @@ router.get(
         });
       }
 
-      const orders = await Order.find({
-        "items.seller": seller._id,
-      })
-        .sort({ createdAt: -1 })
-        .populate("buyer", "name email phone");
+      const orders =
+        await Order.find({
+          "items.seller":
+            seller._id,
+        })
+          .sort({
+            createdAt: -1,
+          })
+          .populate(
+            "buyer",
+            "name email phone"
+          );
 
-      const sellerOrders = orders.map((order) => {
-        const sellerItems = order.items.filter(
-          (item) =>
-            item.seller &&
-            item.seller.toString() ===
-              seller._id.toString()
+      const sellerOrders =
+        orders.map(
+          (order) => {
+            const sellerItems =
+              order.items.filter(
+                (item) =>
+                  item.seller &&
+                  item.seller.toString() ===
+                    seller._id.toString()
+              );
+
+            const sellerTotal =
+              sellerItems.reduce(
+                (sum, item) =>
+                  sum +
+                  Number(
+                    item.subtotal ||
+                      0
+                  ),
+                0
+              );
+
+            return {
+              id:
+                order._id,
+
+              orderNumber:
+                order.orderNumber,
+
+              buyer:
+                order.buyer,
+
+              items:
+                sellerItems,
+
+              total:
+                sellerTotal,
+
+              paymentStatus:
+                order.paymentStatus,
+
+              orderStatus:
+                order.orderStatus,
+
+              deliveryAddress:
+                order.deliveryAddress,
+
+              createdAt:
+                order.createdAt,
+            };
+          }
         );
-
-        const sellerTotal = sellerItems.reduce(
-          (sum, item) =>
-            sum + Number(item.subtotal || 0),
-          0
-        );
-
-        return {
-          id: order._id,
-          orderNumber: order.orderNumber,
-          buyer: order.buyer,
-          items: sellerItems,
-          total: sellerTotal,
-          paymentStatus: order.paymentStatus,
-          orderStatus: order.orderStatus,
-          deliveryAddress: order.deliveryAddress,
-          createdAt: order.createdAt,
-        };
-      });
 
       return res.json({
         success: true,
-        count: sellerOrders.length,
-        orders: sellerOrders,
+
+        count:
+          sellerOrders.length,
+
+        orders:
+          sellerOrders,
       });
     } catch (error) {
       console.error(
@@ -1807,7 +2018,8 @@ router.get(
 
       return res.status(500).json({
         success: false,
-        message: "Unable to load seller orders",
+        message:
+          "Unable to load seller orders",
       });
     }
   }
@@ -1823,7 +2035,8 @@ router.patch(
   protect,
   async (req, res) => {
     try {
-      const { status } = req.body;
+      const { status } =
+        req.body;
 
       const allowedStatuses = [
         "processing",
@@ -1832,10 +2045,16 @@ router.patch(
         "cancelled",
       ];
 
-      if (!status || !allowedStatuses.includes(status)) {
+      if (
+        !status ||
+        !allowedStatuses.includes(
+          status
+        )
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid order status",
+          message:
+            "Invalid order status",
         });
       }
 
@@ -1846,7 +2065,8 @@ router.patch(
       ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid order ID",
+          message:
+            "Invalid order ID",
         });
       }
 
@@ -1857,14 +2077,19 @@ router.patch(
       ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid product ID",
+          message:
+            "Invalid product ID",
         });
       }
 
-      const seller = await Seller.findOne({
-        user: req.user.userId,
-        status: "approved",
-      });
+      const seller =
+        await Seller.findOne({
+          user:
+            req.user.userId,
+
+          status:
+            "approved",
+        });
 
       if (!seller) {
         return res.status(403).json({
@@ -1874,18 +2099,24 @@ router.patch(
         });
       }
 
-      const order = await Order.findOne({
-        _id: req.params.orderId,
-      });
+      const order =
+        await Order.findOne({
+          _id:
+            req.params.orderId,
+        });
 
       if (!order) {
         return res.status(404).json({
           success: false,
-          message: "Order not found",
+          message:
+            "Order not found",
         });
       }
 
-      if (order.paymentStatus !== "paid") {
+      if (
+        order.paymentStatus !==
+        "paid"
+      ) {
         return res.status(400).json({
           success: false,
           message:
@@ -1893,15 +2124,16 @@ router.patch(
         });
       }
 
-      const orderItem = order.items.find(
-        (item) =>
-          item.product &&
-          item.product.toString() ===
-            req.params.productId &&
-          item.seller &&
-          item.seller.toString() ===
-            seller._id.toString()
-      );
+      const orderItem =
+        order.items.find(
+          (item) =>
+            item.product &&
+            item.product.toString() ===
+              req.params.productId &&
+            item.seller &&
+            item.seller.toString() ===
+              seller._id.toString()
+        );
 
       if (!orderItem) {
         return res.status(403).json({
@@ -1912,27 +2144,29 @@ router.patch(
       }
 
       const currentStatus =
-        orderItem.status || "pending";
+        orderItem.status ||
+        "pending";
 
-      const allowedTransitions = {
-        pending: [
-          "processing",
-          "cancelled",
-        ],
+      const allowedTransitions =
+        {
+          pending: [
+            "processing",
+            "cancelled",
+          ],
 
-        processing: [
-          "shipped",
-          "cancelled",
-        ],
+          processing: [
+            "shipped",
+            "cancelled",
+          ],
 
-        shipped: [
-          "delivered",
-        ],
+          shipped: [
+            "delivered",
+          ],
 
-        delivered: [],
+          delivered: [],
 
-        cancelled: [],
-      };
+          cancelled: [],
+        };
 
       if (
         !allowedTransitions[
@@ -1946,66 +2180,118 @@ router.patch(
         });
       }
 
-      orderItem.status = status;
+      orderItem.status =
+        status;
 
-if (status === "delivered") {
-  await SellerEarning.updateMany(
-    {
-      seller: seller._id,
-      order: order._id,
-      product: orderItem.product,
-      status: "pending",
-    },
-    {
-      $set: {
-        status: "available",
-        availableAt: new Date(),
-      },
-    }
-  );
-}
+      /*
+        Seller earnings become available
+        only when the seller marks the
+        purchased item as delivered.
+      */
+      if (
+        status === "delivered"
+      ) {
+        await SellerEarning.updateMany(
+          {
+            seller:
+              seller._id,
 
-await order.save();
+            order:
+              order._id,
 
-      const notificationMessages = {
-        processing: {
-          title: "Order is being processed",
-          message: `Your order ${order.orderNumber} is now being processed by the seller.`,
-          type: "order_processing",
-        },
+            product:
+              orderItem.product,
 
-        shipped: {
-          title: "Order shipped",
-          message: `Your order ${order.orderNumber} has been shipped by the seller.`,
-          type: "order_shipped",
-        },
+            status:
+              "pending",
+          },
+          {
+            $set: {
+              status:
+                "available",
 
-        delivered: {
-          title: "Order delivered",
-          message: `Your order ${order.orderNumber} has been marked as delivered by the seller.`,
-          type: "order_delivered",
-        },
+              availableAt:
+                new Date(),
+            },
+          }
+        );
+      }
 
-        cancelled: {
-          title: "Order cancelled",
-          message: `Your order ${order.orderNumber} has been cancelled by the seller.`,
-          type: "order_cancelled",
-        },
-      };
+      await order.save();
+
+      const notificationMessages =
+        {
+          processing: {
+            title:
+              "Order is being processed",
+
+            message:
+              `Your order ${order.orderNumber} is now being processed by the seller.`,
+
+            type:
+              "order_processing",
+          },
+
+          shipped: {
+            title:
+              "Order shipped",
+
+            message:
+              `Your order ${order.orderNumber} has been shipped by the seller.`,
+
+            type:
+              "order_shipped",
+          },
+
+          delivered: {
+            title:
+              "Order delivered",
+
+            message:
+              `Your order ${order.orderNumber} has been marked as delivered by the seller.`,
+
+            type:
+              "order_delivered",
+          },
+
+          cancelled: {
+            title:
+              "Order cancelled",
+
+            message:
+              `Your order ${order.orderNumber} has been cancelled by the seller.`,
+
+            type:
+              "order_cancelled",
+          },
+        };
 
       const notification =
-        notificationMessages[status];
+        notificationMessages[
+          status
+        ];
 
       if (notification) {
         try {
           await Notification.create({
-            user: order.buyer,
-            type: notification.type,
-            title: notification.title,
-            message: notification.message,
-            order: order._id,
+            user:
+              order.buyer,
+
+            type:
+              notification.type,
+
+            title:
+              notification.title,
+
+            message:
+              notification.message,
+
+            order:
+              order._id,
           });
-        } catch (notificationError) {
+        } catch (
+          notificationError
+        ) {
           console.error(
             "Buyer notification creation error:",
             notificationError
@@ -2015,13 +2301,22 @@ await order.save();
 
       return res.json({
         success: true,
+
         message:
           "Order item status updated successfully",
+
         order: {
-          id: order._id,
-          orderNumber: order.orderNumber,
-          productId: orderItem.product,
-          status: orderItem.status,
+          id:
+            order._id,
+
+          orderNumber:
+            order.orderNumber,
+
+          productId:
+            orderItem.product,
+
+          status:
+            orderItem.status,
         },
       });
     } catch (error) {
@@ -2049,19 +2344,46 @@ router.post(
   protect,
   async (req, res) => {
     try {
-      const order = await Order.findOne({
-        _id: req.params.orderId,
-        buyer: req.user.userId,
-      });
+      /*
+        IMPORTANT:
+        Validate orderId BEFORE querying MongoDB.
+
+        This prevents:
+        Cast to ObjectId failed
+      */
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid order ID",
+        });
+      }
+
+      const order =
+        await Order.findOne({
+          _id:
+            req.params.orderId,
+
+          buyer:
+            req.user.userId,
+        });
 
       if (!order) {
         return res.status(404).json({
           success: false,
-          message: "Order not found",
+          message:
+            "Order not found",
         });
       }
 
-      if (order.paymentStatus === "paid") {
+      if (
+        order.paymentStatus ===
+        "paid"
+      ) {
         return res.status(400).json({
           success: false,
           message:
@@ -2069,14 +2391,82 @@ router.post(
         });
       }
 
-      const user = await User.findById(
-        req.user.userId
-      );
+      /*
+        Make sure the order still contains
+        valid products and approved/active sellers
+        before opening Paystack.
+      */
+      for (
+        const item of order.items
+      ) {
+        const product =
+          await Product.findOne({
+            _id:
+              item.product,
+
+            status:
+              "active",
+          }).populate({
+            path:
+              "seller",
+
+            select:
+              "status user",
+
+            populate: {
+              path:
+                "user",
+
+              select:
+                "status",
+            },
+          });
+
+        if (!product) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `"${item.title}" is no longer available for payment.`,
+          });
+        }
+
+        if (
+          !product.seller ||
+          product.seller.status !==
+            "approved" ||
+          !product.seller.user ||
+          product.seller.user.status !==
+            "active"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `"${item.title}" is no longer available for payment.`,
+          });
+        }
+
+        if (
+          product.stock <
+          item.quantity
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `Insufficient stock for "${item.title}".`,
+          });
+        }
+      }
+
+      const user =
+        await User.findById(
+          req.user.userId
+        );
 
       if (!user) {
         return res.status(404).json({
           success: false,
-          message: "User account not found",
+          message:
+            "User account not found",
         });
       }
 
@@ -2088,42 +2478,53 @@ router.post(
         });
       }
 
-      const amountInKobo = Math.round(
-        order.total * 100
-      );
+      const amountInKobo =
+        Math.round(
+          Number(order.total) *
+            100
+        );
 
-      const paystackResponse = await fetch(
-        "https://api.paystack.co/transaction/initialize",
-        {
-          method: "POST",
+      const paystackResponse =
+        await fetch(
+          "https://api.paystack.co/transaction/initialize",
+          {
+            method: "POST",
 
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            "Content-Type":
-              "application/json",
-          },
+            headers: {
+              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
 
-          body: JSON.stringify({
-            email: user.email,
-            amount: amountInKobo,
-            currency: "NGN",
-
-            metadata: {
-              orderId:
-                order._id.toString(),
-              orderNumber:
-                order.orderNumber,
-              buyerId:
-                req.user.userId.toString(),
+              "Content-Type":
+                "application/json",
             },
 
-            callback_url:
-              process.env
-                .PAYSTACK_CALLBACK_URL ||
-              "http://localhost:5173/payment/callback",
-          }),
-        }
-      );
+            body: JSON.stringify({
+              email:
+                user.email,
+
+              amount:
+                amountInKobo,
+
+              currency:
+                "NGN",
+
+              metadata: {
+                orderId:
+                  order._id.toString(),
+
+                orderNumber:
+                  order.orderNumber,
+
+                buyerId:
+                  req.user.userId.toString(),
+              },
+
+              callback_url:
+                process.env
+                  .PAYSTACK_CALLBACK_URL ||
+                "http://localhost:5173/payment/callback",
+            }),
+          }
+        );
 
       const paystackData =
         await paystackResponse.json();
@@ -2146,34 +2547,78 @@ router.post(
       }
 
       const paymentReference =
-        paystackData.data.reference;
+        paystackData.data
+          ?.reference;
+
+      if (!paymentReference) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Paystack did not return a payment reference",
+        });
+      }
 
       await Payment.findOneAndUpdate(
         {
-          order: order._id,
+          order:
+            order._id,
         },
+
         {
           $set: {
-            buyer: req.user.userId,
-            reference: paymentReference,
-            amount: order.total,
-            currency: "NGN",
-            status: "pending",
-            verificationProcessed: false,
-            transactionId: "",
-            channel: "",
-            gatewayResponse: "",
-            paidAt: null,
-            refundedAmount: 0,
-            refundReference: "",
-            refundedAt: null,
-            verifiedAt: null,
+            buyer:
+              req.user.userId,
+
+            reference:
+              paymentReference,
+
+            amount:
+              order.total,
+
+            currency:
+              "NGN",
+
+            status:
+              "pending",
+
+            verificationProcessed:
+              false,
+
+            transactionId:
+              "",
+
+            channel:
+              "",
+
+            gatewayResponse:
+              "",
+
+            paidAt:
+              null,
+
+            refundedAmount:
+              0,
+
+            refundReference:
+              "",
+
+            refundedAt:
+              null,
+
+            verifiedAt:
+              null,
           },
         },
+
         {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true,
+          upsert:
+            true,
+
+          new:
+            true,
+
+          setDefaultsOnInsert:
+            true,
         }
       );
 
@@ -2184,6 +2629,7 @@ router.post(
 
       return res.json({
         success: true,
+
         message:
           "Payment initialized successfully",
 
@@ -2193,17 +2639,22 @@ router.post(
               .authorization_url,
 
           accessCode:
-            paystackData.data.access_code,
+            paystackData.data
+              .access_code,
 
           reference:
             paymentReference,
         },
 
         order: {
-          id: order._id,
+          id:
+            order._id,
+
           orderNumber:
             order.orderNumber,
-          total: order.total,
+
+          total:
+            order.total,
         },
       });
     } catch (error) {
@@ -2234,7 +2685,24 @@ router.post(
       await mongoose.startSession();
 
     try {
-      const { reference } = req.body;
+      /*
+        IMPORTANT:
+        Validate orderId BEFORE MongoDB query.
+      */
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.orderId
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid order ID",
+        });
+      }
+
+      const { reference } =
+        req.body;
 
       if (!reference) {
         return res.status(400).json({
@@ -2244,24 +2712,60 @@ router.post(
         });
       }
 
-      const order = await Order.findOne({
-        _id: req.params.orderId,
-        buyer: req.user.userId,
-      });
+      const cleanReference =
+        String(reference).trim();
+
+      const order =
+        await Order.findOne({
+          _id:
+            req.params.orderId,
+
+          buyer:
+            req.user.userId,
+        });
 
       if (!order) {
         return res.status(404).json({
           success: false,
-          message: "Order not found",
+          message:
+            "Order not found",
         });
       }
 
-      if (order.paymentStatus === "paid") {
+      if (
+        order.paymentStatus ===
+        "paid"
+      ) {
         return res.json({
           success: true,
           message:
             "Order has already been paid for",
           order,
+        });
+      }
+
+      /*
+        The reference being verified must match
+        the reference generated for this order.
+      */
+      if (
+        !order.paymentReference
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This order does not have an active payment reference",
+        });
+      }
+
+      if (
+        order.paymentReference !==
+        cleanReference
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Payment reference does not match this order",
         });
       }
 
@@ -2273,21 +2777,19 @@ router.post(
         });
       }
 
-      /*
-        Verify directly with Paystack.
-      */
-      const paystackResponse = await fetch(
-        `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-          reference
-        )}`,
-        {
-          method: "GET",
+      const paystackResponse =
+        await fetch(
+          `https://api.paystack.co/transaction/verify/${encodeURIComponent(
+            cleanReference
+          )}`,
+          {
+            method: "GET",
 
-          headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          },
-        }
-      );
+            headers: {
+              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            },
+          }
+        );
 
       const paystackData =
         await paystackResponse.json();
@@ -2308,22 +2810,19 @@ router.post(
         paystackData.data;
 
       if (
-        transaction.status !== "success"
+        transaction.status !==
+        "success"
       ) {
         return res.status(400).json({
           success: false,
-          message: `Payment has not been completed. Current status: ${transaction.status}`,
+          message:
+            `Payment has not been completed. Current status: ${transaction.status}`,
         });
       }
 
-      /*
-        Make sure this Paystack transaction
-        belongs to this order.
-      */
       if (
-        order.paymentReference &&
-        order.paymentReference !==
-          transaction.reference
+        transaction.reference !==
+        order.paymentReference
       ) {
         return res.status(400).json({
           success: false,
@@ -2332,12 +2831,11 @@ router.post(
         });
       }
 
-      /*
-        Make sure the amount paid is exactly
-        the amount expected by Vendora.
-      */
       const expectedAmount =
-        Math.round(order.total * 100);
+        Math.round(
+          Number(order.total) *
+            100
+        );
 
       if (
         Number(transaction.amount) !==
@@ -2350,11 +2848,9 @@ router.post(
         });
       }
 
-      /*
-        Make sure the currency is correct.
-      */
       if (
-        transaction.currency !== "NGN"
+        transaction.currency !==
+        "NGN"
       ) {
         return res.status(400).json({
           success: false,
@@ -2367,8 +2863,11 @@ router.post(
         async () => {
           const currentOrder =
             await Order.findOne({
-              _id: order._id,
-              buyer: req.user.userId,
+              _id:
+                order._id,
+
+              buyer:
+                req.user.userId,
             }).session(session);
 
           if (!currentOrder) {
@@ -2377,10 +2876,6 @@ router.post(
             );
           }
 
-          /*
-            Protect against duplicate payment
-            processing.
-          */
           if (
             currentOrder.paymentStatus ===
             "paid"
@@ -2398,10 +2893,15 @@ router.post(
             const updatedProduct =
               await Product.findOneAndUpdate(
                 {
-                  _id: item.product,
-                  status: "active",
+                  _id:
+                    item.product,
+
+                  status:
+                    "active",
+
                   stock: {
-                    $gte: item.quantity,
+                    $gte:
+                      item.quantity,
                   },
                 },
 
@@ -2413,7 +2913,9 @@ router.post(
                 },
 
                 {
-                  new: true,
+                  new:
+                    true,
+
                   session,
                 }
               );
@@ -2425,9 +2927,6 @@ router.post(
             }
           }
 
-          /*
-            Update the order.
-          */
           currentOrder.paymentStatus =
             "paid";
 
@@ -2441,45 +2940,33 @@ router.post(
             session,
           });
 
-          /*
-            Vendora commission.
-
-            Commission is calculated from the
-            product subtotal only.
-
-            Delivery fees are excluded.
-          */
           const productSubtotal =
             Number(
-              currentOrder.subtotal || 0
+              currentOrder.subtotal ||
+                0
             );
 
           const commissionRate =
             Number(
-              process.env.VENDORA_COMMISSION_RATE ||
+              process.env
+                .VENDORA_COMMISSION_RATE ||
                 5
             );
 
-          /*
-            Calculate commission for every
-            individual order item.
-
-            This is important because an order
-            can contain products from multiple
-            sellers.
-          */
           const sellerEarningData =
             currentOrder.items.map(
               (item) => {
                 const grossAmount =
                   Number(
-                    item.subtotal || 0
+                    item.subtotal ||
+                      0
                   );
 
                 const commissionAmount =
                   Math.round(
                     grossAmount *
-                      (commissionRate / 100) *
+                      (commissionRate /
+                        100) *
                       100
                   ) / 100;
 
@@ -2520,10 +3007,6 @@ router.post(
               }
             );
 
-          /*
-            Total Vendora commission across
-            all products in the order.
-          */
           const totalCommissionAmount =
             sellerEarningData.reduce(
               (sum, earning) =>
@@ -2541,13 +3024,6 @@ router.post(
                 100
             ) / 100;
 
-          /*
-            Seller amount is the product
-            subtotal minus Vendora commission.
-
-            Delivery fees are excluded because
-            they are not seller earnings.
-          */
           const sellerAmount =
             Math.max(
               productSubtotal -
@@ -2555,19 +3031,13 @@ router.post(
               0
             );
 
-          /*
-            Create/update the permanent
-            successful Payment record.
-
-            We retrieve the document so its
-            _id can be attached to SellerEarning.
-          */
           const payment =
             await Payment.findOneAndUpdate(
               {
                 order:
                   currentOrder._id,
               },
+
               {
                 $set: {
                   buyer:
@@ -2626,10 +3096,17 @@ router.post(
                     new Date(),
                 },
               },
+
               {
-                upsert: true,
-                new: true,
-                setDefaultsOnInsert: true,
+                upsert:
+                  true,
+
+                new:
+                  true,
+
+                setDefaultsOnInsert:
+                  true,
+
                 session,
               }
             );
@@ -2643,12 +3120,8 @@ router.post(
           /*
             Create seller earnings.
 
-            Each product gets its own earning
-            record so multi-seller orders are
-            accounted for correctly.
-
-            The unique earningKey prevents the
-            same earning from being created twice.
+            The earningKey prevents duplicate
+            earning records.
           */
           for (
             const earning of sellerEarningData
@@ -2658,6 +3131,7 @@ router.post(
                 earningKey:
                   earning.earningKey,
               },
+
               {
                 $setOnInsert: {
                   seller:
@@ -2706,19 +3180,22 @@ router.post(
                     earning.earningKey,
                 },
               },
+
               {
-                upsert: true,
-                new: true,
-                setDefaultsOnInsert: true,
+                upsert:
+                  true,
+
+                new:
+                  true,
+
+                setDefaultsOnInsert:
+                  true,
+
                 session,
               }
             );
           }
 
-          /*
-            Remove the purchased products from
-            the buyer's cart.
-          */
           const purchasedProductIds =
             currentOrder.items.map(
               (item) =>
@@ -2727,7 +3204,8 @@ router.post(
 
           await Cart.updateOne(
             {
-              user: req.user.userId,
+              user:
+                req.user.userId,
             },
 
             {
@@ -2758,13 +3236,16 @@ router.post(
 
       return res.json({
         success: true,
+
         message:
           "Payment verified successfully",
-        order: finalOrder,
+
+        order:
+          finalOrder,
       });
     } catch (error) {
       console.error(
-        "Verify Paystack payment error:",  
+        "Verify Paystack payment error:",
         error
       );
 
@@ -2790,12 +3271,27 @@ router.get(
   protect,
   async (req, res) => {
     try {
-      const order = await Order.findOne({
-        paymentReference:
-          req.params.reference,
+      const reference =
+        String(
+          req.params.reference
+        ).trim();
 
-        buyer: req.user.userId,
-      });
+      if (!reference) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Payment reference is required",
+        });
+      }
+
+      const order =
+        await Order.findOne({
+          paymentReference:
+            reference,
+
+          buyer:
+            req.user.userId,
+        });
 
       if (!order) {
         return res.status(404).json({
@@ -2807,7 +3303,8 @@ router.get(
 
       return res.json({
         success: true,
-        orderId: order._id,
+        orderId:
+          order._id,
       });
     } catch (error) {
       console.error(
@@ -2824,11 +3321,43 @@ router.get(
   }
 );
 
+
+
+router.get("/my-orders", protect, async (req, res) => {
+  try {
+    const orders = await Order.find({
+      buyer: req.user.userId,
+    })
+      .populate({
+        path: "items.seller",
+        select: "storeName logo",
+      })
+      .sort({
+        createdAt: -1,
+      });
+
+    return res.status(200).json({
+      success: true,
+      orders,
+    });
+  } catch (error) {
+    console.error(
+      "Get my orders error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load orders",
+    });
+  }
+});
 /*
   GET SINGLE ORDER
 
   IMPORTANT:
-  This is the LAST GET route with :orderId.
+  This must remain the LAST GET route
+  containing :orderId.
 
   GET /api/orders/:orderId
 */
@@ -2838,13 +3367,11 @@ router.get(
   async (req, res) => {
     try {
       /*
-        Make sure the ID is actually a MongoDB
-        ObjectId before querying MongoDB.
+        Validate ObjectId before querying MongoDB.
 
-        This prevents errors such as:
-
-        Cast to ObjectId failed for value
-        "seller-dashboard"
+        This prevents:
+        Cast to ObjectId failed
+        and returns a clean API response.
       */
       if (
         !mongoose.Types.ObjectId.isValid(
@@ -2853,14 +3380,18 @@ router.get(
       ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid order ID",
+          message:
+            "Invalid order ID",
         });
       }
 
       const order =
         await Order.findOne({
-          _id: req.params.orderId,
-          buyer: req.user.userId,
+          _id:
+            req.params.orderId,
+
+          buyer:
+            req.user.userId,
         }).populate(
           "items.seller",
           "storeName location rating"
@@ -2869,7 +3400,8 @@ router.get(
       if (!order) {
         return res.status(404).json({
           success: false,
-          message: "Order not found",
+          message:
+            "Order not found",
         });
       }
 
@@ -2885,7 +3417,8 @@ router.get(
 
       return res.status(500).json({
         success: false,
-        message: "Unable to load order",
+        message:
+          "Unable to load order",
       });
     }
   }

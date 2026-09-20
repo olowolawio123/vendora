@@ -52,6 +52,12 @@ const productSchema = new mongoose.Schema(
       default: "draft",
     },
 
+    sellerSuspended: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     rating: {
       type: Number,
       default: 0,
