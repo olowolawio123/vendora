@@ -29,22 +29,15 @@ const SellerDashboard = () => {
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-
-  const [earningsLoading, setEarningsLoading] =
+  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [payoutLoading, setPayoutLoading] = useState(false);
+  const [banksLoading, setBanksLoading] = useState(false);
+  const [payoutAccountLoading, setPayoutAccountLoading] =
     useState(true);
-
-  const [payoutLoading, setPayoutLoading] =
-    useState(false);
-
-  const [banksLoading, setBanksLoading] =
-    useState(false);
-
   const [withdrawalLoading, setWithdrawalLoading] =
     useState(true);
-
   const [withdrawalSubmitting, setWithdrawalSubmitting] =
     useState(false);
-
   const [withdrawalCancelling, setWithdrawalCancelling] =
     useState(false);
 
@@ -99,6 +92,9 @@ const SellerDashboard = () => {
 
   const [recentOrders, setRecentOrders] = useState([]);
 
+  /*
+    LOAD DASHBOARD
+  */
   useEffect(() => {
     const loadDashboard = async () => {
       try {
@@ -168,6 +164,9 @@ const SellerDashboard = () => {
     loadDashboard();
   }, []);
 
+  /*
+    LOAD SELLER EARNINGS
+  */
   useEffect(() => {
     const loadEarnings = async () => {
       try {
@@ -236,6 +235,9 @@ const SellerDashboard = () => {
     loadEarnings();
   }, []);
 
+  /*
+    LOAD PAYSTACK BANKS
+  */
   useEffect(() => {
     const loadBanks = async () => {
       try {
@@ -276,6 +278,83 @@ const SellerDashboard = () => {
     loadBanks();
   }, []);
 
+  /*
+    LOAD SAVED PAYOUT ACCOUNT
+
+    This is the important part that makes
+    payout verification survive page refresh.
+  */
+  useEffect(() => {
+    const loadPayoutAccount = async () => {
+      try {
+        setPayoutAccountLoading(true);
+
+        const response = await apiFetch(
+          "/api/orders/seller-payout",
+          {
+            method: "GET",
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+              "Unable to load payout account"
+          );
+        }
+
+        if (data.payout) {
+          const savedPayout = {
+            bankCode:
+              data.payout.bankCode || "",
+
+            bankName:
+              data.payout.bankName || "",
+
+            accountNumber:
+              data.payout.accountNumber || "",
+
+            accountName:
+              data.payout.accountName || "",
+
+            verified:
+              Boolean(data.payout.verified),
+
+            verifiedAt:
+              data.payout.verifiedAt || null,
+          };
+
+          setPayout(savedPayout);
+
+          setPayoutForm({
+            bankCode:
+              savedPayout.bankCode,
+
+            bankName:
+              savedPayout.bankName,
+
+            accountNumber:
+              savedPayout.accountNumber,
+          });
+        }
+      } catch (error) {
+        console.error(
+          "Seller payout account error:",
+          error
+        );
+      } finally {
+        setPayoutAccountLoading(false);
+      }
+    };
+
+    loadPayoutAccount();
+  }, []);
+
+  /*
+    LOAD WITHDRAWAL DATA
+  */
   useEffect(() => {
     const loadWithdrawalData = async () => {
       try {
@@ -323,17 +402,24 @@ const SellerDashboard = () => {
         setWithdrawalBalance({
           availableAmount:
             Number(
-              balanceData.balance?.available
+              balanceData.balance
+                ?.availableAmount ??
+                balanceData.balance?.available
             ) || 0,
 
           pendingWithdrawalAmount:
             Number(
-              balanceData.balance?.pendingWithdrawal
+              balanceData.balance
+                ?.pendingWithdrawalAmount ??
+                balanceData.balance
+                  ?.pendingWithdrawal
             ) || 0,
 
           withdrawnAmount:
             Number(
-              balanceData.balance?.withdrawn
+              balanceData.balance
+                ?.withdrawnAmount ??
+                balanceData.balance?.withdrawn
             ) || 0,
         });
 
@@ -358,6 +444,9 @@ const SellerDashboard = () => {
     loadWithdrawalData();
   }, []);
 
+  /*
+    FORMAT CURRENCY
+  */
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-NG", {
       style: "currency",
@@ -366,6 +455,9 @@ const SellerDashboard = () => {
     }).format(amount || 0);
   };
 
+  /*
+    FORMAT DATE
+  */
   const formatDate = (date) => {
     if (!date) {
       return "—";
@@ -381,6 +473,9 @@ const SellerDashboard = () => {
     );
   };
 
+  /*
+    FORMAT DATE + TIME
+  */
   const formatDateTime = (date) => {
     if (!date) {
       return "—";
@@ -398,6 +493,9 @@ const SellerDashboard = () => {
     );
   };
 
+  /*
+    WITHDRAWAL STATUS CLASS
+  */
   const getWithdrawalStatusClass = (
     status
   ) => {
@@ -425,6 +523,9 @@ const SellerDashboard = () => {
     }
   };
 
+  /*
+    WITHDRAWAL STATUS LABEL
+  */
   const getWithdrawalStatusLabel = (
     status
   ) => {
@@ -452,6 +553,9 @@ const SellerDashboard = () => {
     }
   };
 
+  /*
+    PAYOUT FORM CHANGE
+  */
   const handlePayoutChange = (event) => {
     const { name, value } = event.target;
 
@@ -463,7 +567,8 @@ const SellerDashboard = () => {
       setPayoutForm((previous) => ({
         ...previous,
         bankCode: value,
-        bankName: selectedBank?.name || "",
+        bankName:
+          selectedBank?.name || "",
       }));
 
       return;
@@ -475,6 +580,9 @@ const SellerDashboard = () => {
     }));
   };
 
+  /*
+    VERIFY PAYOUT ACCOUNT
+  */
   const handleVerifyPayout = async (event) => {
     event.preventDefault();
 
@@ -514,8 +622,10 @@ const SellerDashboard = () => {
           body: JSON.stringify({
             bankCode:
               payoutForm.bankCode,
+
             bankName:
               payoutForm.bankName,
+
             accountNumber:
               payoutForm.accountNumber.trim(),
           }),
@@ -531,7 +641,25 @@ const SellerDashboard = () => {
         );
       }
 
-      setPayout(data.payout);
+      setPayout({
+        bankCode:
+          data.payout?.bankCode || "",
+
+        bankName:
+          data.payout?.bankName || "",
+
+        accountNumber:
+          data.payout?.accountNumber || "",
+
+        accountName:
+          data.payout?.accountName || "",
+
+        verified:
+          Boolean(data.payout?.verified),
+
+        verifiedAt:
+          data.payout?.verifiedAt || null,
+      });
 
       setPayoutForm({
         bankCode:
@@ -562,6 +690,9 @@ const SellerDashboard = () => {
     }
   };
 
+  /*
+    REFRESH WITHDRAWAL DATA
+  */
   const refreshWithdrawalData = async () => {
     try {
       const [
@@ -607,19 +738,23 @@ const SellerDashboard = () => {
         availableAmount:
           Number(
             balanceData.balance
-              ?.availableAmount
+              ?.availableAmount ??
+              balanceData.balance?.available
           ) || 0,
 
         pendingWithdrawalAmount:
           Number(
             balanceData.balance
-              ?.pendingWithdrawalAmount
+              ?.pendingWithdrawalAmount ??
+              balanceData.balance
+                ?.pendingWithdrawal
           ) || 0,
 
         withdrawnAmount:
           Number(
             balanceData.balance
-              ?.withdrawnAmount
+              ?.withdrawnAmount ??
+              balanceData.balance?.withdrawn
           ) || 0,
       });
 
@@ -639,6 +774,9 @@ const SellerDashboard = () => {
     }
   };
 
+  /*
+    WITHDRAW ALL
+  */
   const handleWithdrawAll = () => {
     if (
       withdrawalBalance.availableAmount <= 0
@@ -656,6 +794,9 @@ const SellerDashboard = () => {
     );
   };
 
+  /*
+    REQUEST WITHDRAWAL
+  */
   const handleWithdrawalRequest = async (
     event
   ) => {
@@ -740,6 +881,52 @@ const SellerDashboard = () => {
     }
   };
 
+  const handleProcessWithdrawal = async () => {
+  try {
+    setWithdrawalSubmitting(true);
+
+    const response = await apiFetch(
+      "/api/orders/seller-withdrawal/process",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.message ||
+          "Unable to process withdrawal"
+      );
+    }
+
+    toast.success(
+      data.message ||
+        "Withdrawal submitted for processing"
+    );
+
+    await refreshWithdrawalData();
+  } catch (error) {
+    console.error(
+      "Seller withdrawal processing error:",
+      error
+    );
+
+    toast.error(
+      error.message ||
+        "Unable to process withdrawal"
+    );
+  } finally {
+    setWithdrawalSubmitting(false);
+  }
+};
+  /*
+    CANCEL WITHDRAWAL
+  */
   const handleCancelWithdrawal = async () => {
     try {
       setWithdrawalCancelling(true);
@@ -781,6 +968,9 @@ const SellerDashboard = () => {
     }
   };
 
+  /*
+    STAT CARDS
+  */
   const statCards = [
     {
       title: "Products",
@@ -793,6 +983,7 @@ const SellerDashboard = () => {
       iconStyle:
         "bg-blue-50 text-blue-600",
     },
+
     {
       title: "Orders",
       value: loading
@@ -804,6 +995,7 @@ const SellerDashboard = () => {
       iconStyle:
         "bg-purple-50 text-purple-600",
     },
+
     {
       title: "Sales",
       value: loading
@@ -815,6 +1007,7 @@ const SellerDashboard = () => {
       iconStyle:
         "bg-green-50 text-green-600",
     },
+
     {
       title: "Rating",
       value: loading
@@ -830,6 +1023,9 @@ const SellerDashboard = () => {
     },
   ];
 
+  /*
+    FINANCE CARDS
+  */
   const financeCards = [
     {
       title: "Pending Earnings",
@@ -844,6 +1040,7 @@ const SellerDashboard = () => {
       iconStyle:
         "bg-yellow-50 text-yellow-600",
     },
+
     {
       title: "Available Earnings",
       value: earningsLoading
@@ -857,6 +1054,7 @@ const SellerDashboard = () => {
       iconStyle:
         "bg-green-50 text-green-600",
     },
+
     {
       title: "Vendora Commission",
       value: earningsLoading
@@ -872,6 +1070,9 @@ const SellerDashboard = () => {
     },
   ];
 
+  /*
+    CHECK PENDING WITHDRAWAL
+  */
   const hasPendingWithdrawal =
     withdrawalHistory.some(
       (withdrawal) =>
@@ -1166,9 +1367,7 @@ const SellerDashboard = () => {
                   </div>
 
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-gray-600">
-                    <ArrowDownToLine
-                      size={21}
-                    />
+                    <ArrowDownToLine size={21} />
                   </div>
                 </div>
 
@@ -1194,7 +1393,15 @@ const SellerDashboard = () => {
               </div>
 
               <div className="p-5">
-                {!payout.verified ? (
+                {payoutAccountLoading ? (
+                  <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-5 text-sm text-gray-600">
+                    <Loader2
+                      size={18}
+                      className="animate-spin"
+                    />
+                    Loading payout account...
+                  </div>
+                ) : !payout.verified ? (
                   <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5">
                     <div className="flex items-start gap-3">
                       <ShieldCheck
@@ -1259,9 +1466,7 @@ const SellerDashboard = () => {
                               className="animate-spin"
                             />
                           ) : (
-                            <XCircle
-                              size={17}
-                            />
+                            <XCircle size={17} />
                           )}
 
                           {withdrawalCancelling
@@ -1302,8 +1507,7 @@ const SellerDashboard = () => {
                             }
                             onChange={(event) =>
                               setWithdrawalAmount(
-                                event.target
-                                  .value
+                                event.target.value
                               )
                             }
                             placeholder="Enter amount"
@@ -1373,6 +1577,7 @@ const SellerDashboard = () => {
                       disabled={
                         withdrawalSubmitting ||
                         withdrawalLoading ||
+                        payoutAccountLoading ||
                         !payout.verified ||
                         withdrawalBalance.availableAmount <=
                           0
@@ -1508,7 +1713,9 @@ const SellerDashboard = () => {
 
                             {withdrawal.failureReason && (
                               <p className="mt-2 text-sm text-red-600">
-                                {withdrawal.failureReason}
+                                {
+                                  withdrawal.failureReason
+                                }
                               </p>
                             )}
 
@@ -1594,14 +1801,20 @@ const SellerDashboard = () => {
           </div>
 
           <div className="p-6 sm:p-8">
-            {payout.verified ? (
+            {payoutAccountLoading ? (
+              <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-5 text-sm text-gray-600">
+                <Loader2
+                  size={18}
+                  className="animate-spin"
+                />
+                Loading payout account...
+              </div>
+            ) : payout.verified ? (
               <div className="rounded-2xl border border-green-200 bg-green-50 p-5">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-600">
-                      <CheckCircle2
-                        size={21}
-                      />
+                      <CheckCircle2 size={21} />
                     </div>
 
                     <div>

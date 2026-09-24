@@ -378,6 +378,41 @@ const Products = () => {
   const handlePriceFilter = (event) => {
     event.preventDefault();
 
+    const min = minPrice
+      ? Number(minPrice)
+      : null;
+
+    const max = maxPrice
+      ? Number(maxPrice)
+      : null;
+
+    if (
+      min !== null &&
+      (!Number.isFinite(min) || min < 0)
+    ) {
+      toast.error("Enter a valid minimum price.");
+      return;
+    }
+
+    if (
+      max !== null &&
+      (!Number.isFinite(max) || max < 0)
+    ) {
+      toast.error("Enter a valid maximum price.");
+      return;
+    }
+
+    if (
+      min !== null &&
+      max !== null &&
+      min > max
+    ) {
+      toast.error(
+        "Minimum price cannot be greater than maximum price."
+      );
+      return;
+    }
+
     updateFilters({
       minPriceValue: minPrice,
       maxPriceValue: maxPrice,
@@ -476,15 +511,15 @@ const Products = () => {
             <div className="mt-3 h-5 w-80 max-w-full animate-pulse rounded bg-gray-200" />
           </div>
 
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
             {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
               <div
                 key={item}
-                className="overflow-hidden rounded-2xl border border-gray-200 bg-white"
+                className="overflow-hidden rounded-xl border border-gray-200 bg-white sm:rounded-2xl"
               >
-                <div className="aspect-square animate-pulse bg-gray-100" />
+                <div className="aspect-[4/3] animate-pulse bg-gray-100 sm:aspect-square" />
 
-                <div className="space-y-3 p-5">
+                <div className="space-y-3 p-3 sm:p-5">
                   <div className="h-4 w-20 animate-pulse rounded bg-gray-200" />
 
                   <div className="h-6 w-3/4 animate-pulse rounded bg-gray-200" />
@@ -510,7 +545,10 @@ const Products = () => {
       <main className="min-h-screen bg-gray-50">
         <div className="mx-auto max-w-2xl px-4 py-20 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
-            <Package className="text-red-600" size={25} />
+            <Package
+              className="text-red-600"
+              size={25}
+            />
           </div>
 
           <h1 className="mt-5 text-2xl font-bold text-gray-950">
@@ -570,15 +608,35 @@ const Products = () => {
                 className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
               />
 
-              <input
-                type="search"
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Search products, categories or sellers..."
-                className="h-13 w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-28 text-sm text-gray-900 outline-none transition focus:border-gray-400 focus:bg-white focus:ring-2 focus:ring-gray-100"
-              />
+              <div className="relative">
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(event.target.value)
+                  }
+                  placeholder="Search products, categories or sellers..."
+                  className="h-13 w-full rounded-xl border border-gray-200 bg-gray-50 pl-12 pr-28 text-sm text-gray-900 outline-none transition focus:border-gray-400 focus:bg-white focus:ring-2 focus:ring-gray-100"
+                />
+
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch("");
+
+                      updateFilters({
+                        searchValue: "",
+                        pageValue: 1,
+                      });
+                    }}
+                    aria-label="Clear search"
+                    className="absolute right-28 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <X size={17} />
+                  </button>
+                )}
+              </div>
 
               <button
                 type="submit"
@@ -843,7 +901,7 @@ const Products = () => {
         ) : (
           <>
             {/* PRODUCT GRID */}
-            <div className="grid gap-6 pt-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 pt-6 sm:gap-6 sm:pt-8 lg:grid-cols-3 xl:grid-cols-4">
               {products.map((product) => {
                 const isWishlisted = wishlistIds.has(
                   product._id
@@ -855,13 +913,13 @@ const Products = () => {
                 return (
                   <article
                     key={product._id}
-                    className="group overflow-hidden rounded-2xl border border-gray-200 bg-white transition duration-300 hover:-translate-y-1 hover:border-gray-300 hover:shadow-xl"
+                    className="group overflow-hidden rounded-xl border border-gray-200 bg-white transition duration-300 hover:-translate-y-1 hover:border-gray-300 hover:shadow-xl sm:rounded-2xl"
                   >
                     {/* IMAGE */}
                     <div className="relative">
                       <Link
                         to={`/product/${product._id}`}
-                        className="relative block aspect-square overflow-hidden bg-gray-100"
+                        className="relative block aspect-[4/3] overflow-hidden bg-gray-100 sm:aspect-square"
                       >
                         {product.images?.length > 0 ? (
                           <img
@@ -872,31 +930,32 @@ const Products = () => {
                         ) : (
                           <div className="flex h-full w-full flex-col items-center justify-center text-gray-400">
                             <Package
-                              size={42}
+                              size={34}
                               strokeWidth={1.4}
+                              className="sm:h-[42px] sm:w-[42px]"
                             />
 
-                            <span className="mt-2 text-xs font-medium">
+                            <span className="mt-2 text-[10px] font-medium sm:text-xs">
                               No image available
                             </span>
                           </div>
                         )}
 
                         {/* CATEGORY */}
-                        <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm backdrop-blur">
+                        <span className="absolute left-2 top-2 max-w-[70%] truncate rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-gray-700 shadow-sm backdrop-blur sm:left-3 sm:top-3 sm:px-3 sm:py-1.5 sm:text-xs">
                           {product.category || "Product"}
                         </span>
 
                         {/* STOCK */}
                         {product.stock > 0 &&
                           product.stock <= 5 && (
-                            <span className="absolute right-3 top-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm backdrop-blur">
+                            <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-gray-700 shadow-sm backdrop-blur sm:right-3 sm:top-3 sm:px-3 sm:py-1.5 sm:text-xs">
                               Only {product.stock} left
                             </span>
                           )}
 
                         {product.stock === 0 && (
-                          <span className="absolute right-3 top-3 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white">
+                          <span className="absolute right-2 top-2 rounded-full bg-gray-950 px-2 py-1 text-[10px] font-semibold text-white sm:right-3 sm:top-3 sm:px-3 sm:py-1.5 sm:text-xs">
                             Out of stock
                           </span>
                         )}
@@ -916,7 +975,7 @@ const Products = () => {
                             ? "Remove from wishlist"
                             : "Add to wishlist"
                         }
-                        className={`absolute right-3 bottom-3 flex h-10 w-10 items-center justify-center rounded-full border shadow-sm backdrop-blur transition ${
+                        className={`absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-full border shadow-sm backdrop-blur transition sm:bottom-3 sm:right-3 sm:h-10 sm:w-10 ${
                           isWishlisted
                             ? "border-gray-950 bg-gray-950 text-white"
                             : "border-gray-200 bg-white/95 text-gray-700 hover:border-gray-300 hover:bg-white hover:text-gray-950"
@@ -927,34 +986,43 @@ const Products = () => {
                         }`}
                       >
                         <Heart
-                          size={18}
+                          size={16}
                           fill={
                             isWishlisted
                               ? "currentColor"
                               : "none"
                           }
+                          className="sm:h-[18px] sm:w-[18px]"
                         />
                       </button>
                     </div>
 
                     {/* PRODUCT INFO */}
-                    <div className="p-5">
+                    <div className="p-3 sm:p-5">
 
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start justify-between gap-2">
                         <Link
                           to={`/product/${product._id}`}
                           className="min-w-0"
                         >
-                          <h3 className="truncate text-base font-semibold text-gray-950 transition group-hover:text-gray-600">
+                          <h3 className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-gray-950 transition group-hover:text-gray-600 sm:min-h-12 sm:text-base sm:leading-6">
                             {product.title}
                           </h3>
                         </Link>
 
-                        <div className="flex shrink-0 items-center gap-1 text-xs font-medium text-gray-500">
+                        <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-gray-500 sm:gap-1 sm:text-xs">
                           <Star
-                            size={14}
-                            fill="currentColor"
-                            className="text-gray-400"
+                            size={12}
+                            fill={
+                              Number(product.rating || 0) > 0
+                                ? "currentColor"
+                                : "none"
+                            }
+                            className={
+                              Number(product.rating || 0) > 0
+                                ? "text-yellow-500 sm:h-[14px] sm:w-[14px]"
+                                : "text-gray-400 sm:h-[14px] sm:w-[14px]"
+                            }
                           />
 
                           {Number(
@@ -963,13 +1031,14 @@ const Products = () => {
                         </div>
                       </div>
 
-                      <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-gray-500">
+                      {/* DESCRIPTION */}
+                      <p className="mt-2 hidden line-clamp-2 min-h-10 text-sm leading-5 text-gray-500 sm:block">
                         {product.description}
                       </p>
 
                       {/* PRICE */}
-                      <div className="mt-4">
-                        <span className="text-xl font-bold tracking-tight text-gray-950">
+                      <div className="mt-2 sm:mt-4">
+                        <span className="text-base font-bold tracking-tight text-gray-950 sm:text-xl">
                           ₦
                           {Number(
                             product.price
@@ -978,14 +1047,17 @@ const Products = () => {
                       </div>
 
                       {/* SELLER */}
-                      <div className="mt-4 border-t border-gray-100 pt-4">
-                        <p className="truncate text-xs font-semibold text-gray-700">
+                      <div className="mt-3 border-t border-gray-100 pt-3 sm:mt-4 sm:pt-4">
+                        <p className="truncate text-[10px] font-semibold text-gray-700 sm:text-xs">
                           {product.seller?.storeName ||
                             "Vendora Seller"}
                         </p>
 
-                        <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                          <MapPin size={13} />
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-gray-500 sm:gap-1.5 sm:text-xs">
+                          <MapPin
+                            size={11}
+                            className="shrink-0 sm:h-[13px] sm:w-[13px]"
+                          />
 
                           <span className="truncate">
                             {product.seller?.location ||
@@ -997,15 +1069,21 @@ const Products = () => {
                       {/* BUTTON */}
                       <Link
                         to={`/product/${product._id}`}
-                        className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-gray-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-gray-800"
+                        className={`mt-3 flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-[11px] font-semibold text-white transition sm:mt-5 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm ${
+                          product.stock === 0
+                            ? "bg-gray-600 hover:bg-gray-700"
+                            : "bg-gray-950 hover:bg-gray-800"
+                        }`}
                       >
-                        <span className="text-white">
-                          View Product
+                        <span className="truncate text-white">
+                          {product.stock === 0
+                            ? "View Product · Out of Stock"
+                            : "View Product"}
                         </span>
 
                         <ArrowRight
-                          size={16}
-                          className="text-white"
+                          size={14}
+                          className="shrink-0 text-white sm:h-4 sm:w-4"
                         />
                       </Link>
                     </div>

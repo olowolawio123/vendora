@@ -22,6 +22,9 @@ router.post("/", protect, async (req, res) => {
       comment,
     } = req.body;
 
+    /*
+      Validate required fields
+    */
     if (!orderId || !productId || rating === undefined) {
       return res.status(400).json({
         success: false,
@@ -30,6 +33,9 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
+    /*
+      Validate rating
+    */
     const numericRating = Number(rating);
 
     if (
@@ -81,7 +87,7 @@ router.post("/", protect, async (req, res) => {
     }
 
     /*
-      Get the product so we know its current seller.
+      Get the product.
     */
     const product = await Product.findById(
       productId
@@ -95,8 +101,8 @@ router.post("/", protect, async (req, res) => {
     }
 
     /*
-      Make sure the seller in the order matches
-      the product's current seller.
+      Make sure the product seller still matches
+      the seller recorded in the order.
     */
     if (
       product.seller.toString() !==
@@ -128,22 +134,108 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
-    const review = await Review.create({
-      buyer: req.user.userId,
-      seller: orderItem.seller,
-      product: productId,
-      order: orderId,
-      rating: numericRating,
-      comment:
-        typeof comment === "string"
-          ? comment.trim()
-          : "",
-    });
+    /*
+      Clean the comment.
+    */
+    const cleanComment =
+      typeof comment === "string"
+        ? comment.trim()
+        : "";
 
     /*
-      Recalculate the seller's average rating.
+      Create the review.
     */
-    const ratingResult =
+    let review;
+
+    try {
+      review = await Review.create({
+        buyer: req.user.userId,
+        seller: orderItem.seller,
+        product: productId,
+        order: orderId,
+        rating: numericRating,
+        comment: cleanComment,
+      });
+    } catch (error) {
+      /*
+        The Review model has a unique compound index:
+
+        buyer + product + order
+
+        This protects against duplicate reviews even
+        if two requests arrive at almost the same time.
+      */
+      if (error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "You have already reviewed this product",
+        });
+      }
+
+      throw error;
+    }
+
+    /*
+      =====================================================
+      UPDATE PRODUCT RATING
+      =====================================================
+
+      Calculate the average rating and total number
+      of reviews for this specific product.
+    */
+    const productRatingResult =
+      await Review.aggregate([
+        {
+          $match: {
+            product: product._id,
+          },
+        },
+        {
+          $group: {
+            _id: "$product",
+            averageRating: {
+              $avg: "$rating",
+            },
+            reviewCount: {
+              $sum: 1,
+            },
+          },
+        },
+      ]);
+
+    const productAverageRating =
+      productRatingResult.length > 0
+        ? Number(
+            productRatingResult[0].averageRating.toFixed(1)
+          )
+        : 0;
+
+    const productReviewCount =
+      productRatingResult.length > 0
+        ? productRatingResult[0].reviewCount
+        : 0;
+
+    /*
+      Save product rating and review count.
+    */
+    await Product.findByIdAndUpdate(
+      product._id,
+      {
+        rating: productAverageRating,
+        totalReviews: productReviewCount,
+      }
+    );
+
+    /*
+      =====================================================
+      UPDATE SELLER RATING
+      =====================================================
+
+      Calculate the seller's average rating from
+      all reviews belonging to this seller.
+    */
+    const sellerRatingResult =
       await Review.aggregate([
         {
           $match: {
@@ -163,25 +255,36 @@ router.post("/", protect, async (req, res) => {
         },
       ]);
 
-    const averageRating =
-      ratingResult.length > 0
+    const sellerAverageRating =
+      sellerRatingResult.length > 0
         ? Number(
-            ratingResult[0].averageRating.toFixed(1)
+            sellerRatingResult[0].averageRating.toFixed(1)
           )
         : 0;
 
+    /*
+      Save seller rating.
+    */
     await Seller.findByIdAndUpdate(
       orderItem.seller,
       {
-        rating: averageRating,
+        rating: sellerAverageRating,
       }
     );
 
+    /*
+      Return the completed result.
+    */
     return res.status(201).json({
       success: true,
       message: "Review submitted successfully",
+
       review,
-      sellerRating: averageRating,
+
+      productRating: productAverageRating,
+      productTotalReviews: productReviewCount,
+
+      sellerRating: sellerAverageRating,
     });
   } catch (error) {
     console.error(
@@ -189,7 +292,7 @@ router.post("/", protect, async (req, res) => {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Unable to submit review",
     });
@@ -211,9 +314,48 @@ router.get(
         .populate("buyer", "name")
         .sort({ createdAt: -1 });
 
-      res.json({
+      /*
+        Calculate rating summary for the product.
+      */
+      const ratingResult =
+        await Review.aggregate([
+          {
+            $match: {
+              product: new (require("mongoose").Types.ObjectId)(
+                req.params.productId
+              ),
+            },
+          },
+          {
+            $group: {
+              _id: "$product",
+              averageRating: {
+                $avg: "$rating",
+              },
+              reviewCount: {
+                $sum: 1,
+              },
+            },
+          },
+        ]);
+
+      const averageRating =
+        ratingResult.length > 0
+          ? Number(
+              ratingResult[0].averageRating.toFixed(1)
+            )
+          : 0;
+
+      const reviewCount =
+        ratingResult.length > 0
+          ? ratingResult[0].reviewCount
+          : 0;
+
+      return res.json({
         success: true,
         count: reviews.length,
+        rating: averageRating,
+        totalReviews: reviewCount,
         reviews,
       });
     } catch (error) {
@@ -222,7 +364,7 @@ router.get(
         error.message
       );
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: "Unable to load reviews",
       });
@@ -246,9 +388,49 @@ router.get(
         .populate("product", "title")
         .sort({ createdAt: -1 });
 
-      res.json({
+      /*
+        Calculate seller rating summary.
+      */
+      const ratingResult =
+        await Review.aggregate([
+          {
+            $match: {
+              seller:
+                new (require("mongoose").Types.ObjectId)(
+                  req.params.sellerId
+                ),
+            },
+          },
+          {
+            $group: {
+              _id: "$seller",
+              averageRating: {
+                $avg: "$rating",
+              },
+              reviewCount: {
+                $sum: 1,
+              },
+            },
+          },
+        ]);
+
+      const averageRating =
+        ratingResult.length > 0
+          ? Number(
+              ratingResult[0].averageRating.toFixed(1)
+            )
+          : 0;
+
+      const reviewCount =
+        ratingResult.length > 0
+          ? ratingResult[0].reviewCount
+          : 0;
+
+      return res.json({
         success: true,
         count: reviews.length,
+        rating: averageRating,
+        totalReviews: reviewCount,
         reviews,
       });
     } catch (error) {
@@ -257,7 +439,7 @@ router.get(
         error.message
       );
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: "Unable to load seller reviews",
       });

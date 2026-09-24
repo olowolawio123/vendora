@@ -17,6 +17,9 @@ const userRoutes = require("./routes/userRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const paystackWebhookRoutes = require("./routes/paystackWebhookRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+const messageRoutes = require("./routes/messageRoutes");
+const couponRoutes = require("./routes/couponRoutes");
 
 const { sendTestEmail } = require("./services/emailService");
 
@@ -67,6 +70,9 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/support", supportRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/coupons", couponRoutes);
 
 // Temporary Resend test route
 app.get("/api/test-email", async (req, res) => {

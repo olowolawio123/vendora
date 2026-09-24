@@ -124,6 +124,25 @@ const orderSchema = new mongoose.Schema(
       min: 0,
     },
 
+    /*
+     * COUPON INFORMATION
+     *
+     * couponCode stores the coupon used for the order.
+     * discount stores the actual amount deducted from the order.
+     */
+    couponCode: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+    },
+
+    discount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     deliveryFee: {
       type: Number,
       required: true,

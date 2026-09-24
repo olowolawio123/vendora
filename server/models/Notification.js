@@ -18,6 +18,7 @@ const notificationSchema = new mongoose.Schema(
         "order_shipped",
         "order_delivered",
         "order_cancelled",
+        "new_message",
         "general",
       ],
       default: "general",
@@ -38,6 +39,12 @@ const notificationSchema = new mongoose.Schema(
     order: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order",
+      default: null,
+    },
+
+    conversation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
       default: null,
     },
 

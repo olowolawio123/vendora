@@ -5,6 +5,7 @@ const Payment = require("../models/Payment");
 const Order = require("../models/Order");
 const Refund = require("../models/Refund");
 const SellerEarning = require("../models/SellerEarning");
+const Withdrawal = require("../models/Withdrawal");
 
 const router = express.Router();
 
@@ -12,8 +13,7 @@ const router = express.Router();
 // VERIFY PAYSTACK WEBHOOK SIGNATURE
 // =====================================================
 const verifyPaystackSignature = (req) => {
-  const signature =
-    req.headers["x-paystack-signature"];
+  const signature = req.headers["x-paystack-signature"];
 
   if (!signature || !req.rawBody) {
     return false;
@@ -27,10 +27,112 @@ const verifyPaystackSignature = (req) => {
     .update(req.rawBody)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(hash),
-    Buffer.from(signature)
+  const hashBuffer = Buffer.from(hash, "utf8");
+  const signatureBuffer = Buffer.from(
+    String(signature),
+    "utf8"
   );
+
+  if (
+    hashBuffer.length !==
+    signatureBuffer.length
+  ) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    hashBuffer,
+    signatureBuffer
+  );
+};
+
+// =====================================================
+// RELEASE WITHDRAWAL EARNINGS
+//
+// Used when Paystack transfer fails or is reversed.
+// Reserved earnings become available again.
+// =====================================================
+const releaseWithdrawalEarnings = async (
+  withdrawalId
+) => {
+  const earnings = await SellerEarning.find({
+    withdrawal: withdrawalId,
+    status: "withdrawal_pending",
+  });
+
+  for (const earning of earnings) {
+    earning.reservedAmount = 0;
+    earning.withdrawal = null;
+
+    const remainingAmount = Math.max(
+      0,
+      Number(earning.netAmount || 0) -
+        Number(earning.withdrawnAmount || 0) -
+        Number(earning.refundedAmount || 0)
+    );
+
+    if (remainingAmount > 0) {
+      earning.status = "available";
+    } else if (
+      Number(earning.refundedAmount || 0) >=
+      Number(earning.netAmount || 0)
+    ) {
+      earning.status = "refunded";
+    }
+
+    await earning.save();
+  }
+};
+
+// =====================================================
+// COMPLETE SUCCESSFUL WITHDRAWAL
+//
+// Moves reserved earnings into withdrawnAmount.
+// =====================================================
+const completeWithdrawalEarnings = async (
+  withdrawalId
+) => {
+  const earnings = await SellerEarning.find({
+    withdrawal: withdrawalId,
+    status: "withdrawal_pending",
+  });
+
+  for (const earning of earnings) {
+    const reserved = Number(
+      earning.reservedAmount || 0
+    );
+
+    if (reserved <= 0) {
+      continue;
+    }
+
+    earning.withdrawnAmount =
+      Number(earning.withdrawnAmount || 0) +
+      reserved;
+
+    earning.reservedAmount = 0;
+
+    const remainingAmount = Math.max(
+      0,
+      Number(earning.netAmount || 0) -
+        Number(earning.withdrawnAmount || 0) -
+        Number(earning.refundedAmount || 0)
+    );
+
+    if (remainingAmount > 0) {
+      earning.status = "available";
+    } else if (
+      Number(earning.refundedAmount || 0) >=
+      Number(earning.netAmount || 0)
+    ) {
+      earning.status = "refunded";
+    } else {
+      earning.status = "withdrawn";
+    }
+
+
+    await earning.save();
+  }
 };
 
 // =====================================================
@@ -61,17 +163,23 @@ router.post("/", async (req, res) => {
     );
 
     // =================================================
-    // IGNORE EVENTS WE DO NOT HANDLE
+    // SUPPORTED EVENTS
     // =================================================
-    if (
-      ![
-        "refund.pending",
-        "refund.processing",
-        "refund.needs-attention",
-        "refund.failed",
-        "refund.processed",
-      ].includes(event)
-    ) {
+    const supportedEvents = [
+      // Refund events
+      "refund.pending",
+      "refund.processing",
+      "refund.needs-attention",
+      "refund.failed",
+      "refund.processed",
+
+      // Seller withdrawal events
+      "transfer.success",
+      "transfer.failed",
+      "transfer.reversed",
+    ];
+
+    if (!supportedEvents.includes(event)) {
       return res.status(200).json({
         success: true,
         message: "Event received",
@@ -86,24 +194,454 @@ router.post("/", async (req, res) => {
     }
 
     // =================================================
+    // SELLER WITHDRAWAL / TRANSFER EVENTS
+    // =================================================
+    if (
+      event === "transfer.success" ||
+      event === "transfer.failed" ||
+      event === "transfer.reversed"
+    ) {
+      const transferReference = data.reference
+        ? String(data.reference)
+        : "";
+
+      const transferCode = data.transfer_code
+        ? String(data.transfer_code)
+        : "";
+
+      if (
+        !transferReference &&
+        !transferCode
+      ) {
+        console.warn(
+          "Transfer webhook has no reference or transfer code:",
+          {
+            event,
+            data,
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Transfer webhook received without an identifiable transfer",
+        });
+      }
+
+      // -----------------------------------------------
+      // FIND WITHDRAWAL
+      // -----------------------------------------------
+      let withdrawal = null;
+
+      if (transferReference) {
+        withdrawal =
+          await Withdrawal.findOne({
+            transferReference,
+          });
+      }
+
+      if (
+        !withdrawal &&
+        transferCode
+      ) {
+        withdrawal =
+          await Withdrawal.findOne({
+            transferCode,
+          });
+      }
+
+      if (!withdrawal) {
+        console.warn(
+          "Vendora withdrawal not found for Paystack transfer webhook:",
+          {
+            event,
+            transferReference,
+            transferCode,
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Transfer webhook received but withdrawal was not found",
+        });
+      }
+
+      // -----------------------------------------------
+      // SAVE PAYSTACK RESPONSE
+      // -----------------------------------------------
+      withdrawal.paystackResponse =
+        data || null;
+
+      if (transferReference) {
+        withdrawal.transferReference =
+          transferReference;
+      }
+
+      if (transferCode) {
+        withdrawal.transferCode =
+          transferCode;
+      }
+
+      // =================================================
+      // TRANSFER SUCCESS
+      // =================================================
+      if (
+        event === "transfer.success"
+      ) {
+        // ---------------------------------------------
+        // PREVENT DUPLICATE SUCCESS ACCOUNTING
+        // ---------------------------------------------
+        if (
+          withdrawal.status ===
+            "successful" &&
+          withdrawal.completedAt
+        ) {
+          return res.status(200).json({
+            success: true,
+            message:
+              "Withdrawal already completed",
+          });
+        }
+
+        withdrawal.status =
+          "successful";
+
+        withdrawal.processedAt =
+          withdrawal.processedAt ||
+          new Date();
+
+        withdrawal.completedAt =
+          new Date();
+
+        withdrawal.failureReason = "";
+
+        await withdrawal.save();
+
+        // ---------------------------------------------
+        // MOVE RESERVED MONEY TO WITHDRAWN
+        // ---------------------------------------------
+        await completeWithdrawalEarnings(
+          withdrawal._id
+        );
+
+        console.log(
+          "Vendora seller withdrawal completed successfully:",
+          {
+            withdrawalId:
+              withdrawal._id,
+            seller:
+              withdrawal.seller,
+            amount:
+              withdrawal.amount,
+            transferReference:
+              withdrawal.transferReference,
+            transferCode:
+              withdrawal.transferCode,
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Seller withdrawal marked successful",
+        });
+      }
+
+      // =================================================
+      // TRANSFER FAILED
+      // =================================================
+      if (
+        event === "transfer.failed"
+      ) {
+        // ---------------------------------------------
+        // DUPLICATE FAILED EVENT
+        // ---------------------------------------------
+        if (
+          withdrawal.status ===
+            "failed" &&
+          withdrawal.failedAt
+        ) {
+          return res.status(200).json({
+            success: true,
+            message:
+              "Withdrawal failure already recorded",
+          });
+        }
+
+        withdrawal.status =
+          "failed";
+
+        withdrawal.failureReason =
+          data.reason ||
+          data.message ||
+          data.failure_reason ||
+          "Paystack transfer failed";
+
+        withdrawal.processedAt =
+          withdrawal.processedAt ||
+          new Date();
+
+        withdrawal.failedAt =
+          new Date();
+
+        await withdrawal.save();
+
+        // ---------------------------------------------
+        // RETURN RESERVED MONEY TO SELLER
+        // ---------------------------------------------
+        await releaseWithdrawalEarnings(
+          withdrawal._id
+        );
+
+        console.warn(
+          "Vendora seller withdrawal failed:",
+          {
+            withdrawalId:
+              withdrawal._id,
+            seller:
+              withdrawal.seller,
+            amount:
+              withdrawal.amount,
+            reason:
+              withdrawal.failureReason,
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Seller withdrawal failure recorded",
+        });
+      }
+
+      // =================================================
+      // TRANSFER REVERSED
+      // =================================================
+      if (
+        event === "transfer.reversed"
+      ) {
+        /*
+         * A successful Paystack transfer can later
+         * be reversed.
+         *
+         * If the withdrawal had already been completed,
+         * return the withdrawn amount back into the
+         * seller's available earnings.
+         *
+         * If it was still processing, release the
+         * reserved earnings.
+         */
+
+        // ---------------------------------------------
+        // PREVENT DUPLICATE REVERSAL PROCESSING
+        // ---------------------------------------------
+        if (
+          withdrawal.status === "failed" &&
+          withdrawal.failedAt
+        ) {
+          return res.status(200).json({
+            success: true,
+            message:
+              "Withdrawal reversal already recorded",
+          });
+        }
+
+        // ---------------------------------------------
+        // PREVIOUSLY SUCCESSFUL WITHDRAWAL
+        // ---------------------------------------------
+        if (
+          withdrawal.status ===
+          "successful"
+        ) {
+          const earnings =
+            await SellerEarning.find({
+              seller: withdrawal.seller,
+              withdrawal:
+                withdrawal._id,
+            });
+
+          let remainingToReturn =
+            Number(
+              withdrawal.amount || 0
+            );
+
+          for (
+            const earning of earnings
+          ) {
+            if (
+              remainingToReturn <= 0
+            ) {
+              break;
+            }
+
+            const withdrawnAmount =
+              Number(
+                earning.withdrawnAmount ||
+                  0
+              );
+
+            if (
+              withdrawnAmount <= 0
+            ) {
+              continue;
+            }
+
+            const amountToReturn =
+              Math.min(
+                withdrawnAmount,
+                remainingToReturn
+              );
+
+            earning.withdrawnAmount =
+              Math.max(
+                0,
+                withdrawnAmount -
+                  amountToReturn
+              );
+
+            remainingToReturn =
+              Math.max(
+                0,
+                remainingToReturn -
+                  amountToReturn
+              );
+
+            const netAmount =
+              Number(
+                earning.netAmount ||
+                  0
+              );
+
+            const refundedAmount =
+              Number(
+                earning.refundedAmount ||
+                  0
+              );
+
+            const stillAvailable =
+              Math.max(
+                0,
+                netAmount -
+                  Number(
+                    earning.withdrawnAmount ||
+                      0
+                  ) -
+                  refundedAmount
+              );
+
+            if (
+              refundedAmount >=
+              netAmount
+            ) {
+              earning.status =
+                "refunded";
+            } else if (
+              stillAvailable > 0
+            ) {
+              earning.status =
+                "available";
+            } else {
+              earning.status =
+                "withdrawn";
+            }
+
+            await earning.save();
+          }
+
+          if (
+            remainingToReturn > 0
+          ) {
+            console.error(
+              "Withdrawal reversal could not fully restore withdrawn earnings:",
+              {
+                withdrawalId:
+                  withdrawal._id,
+                remainingToReturn,
+              }
+            );
+          }
+        } else {
+          // -------------------------------------------
+          // WITHDRAWAL STILL PROCESSING
+          // -------------------------------------------
+          await releaseWithdrawalEarnings(
+            withdrawal._id
+          );
+        }
+
+        // ---------------------------------------------
+        // MARK WITHDRAWAL AS FAILED / REVERSED
+        // ---------------------------------------------
+        withdrawal.status =
+          "failed";
+
+        withdrawal.failureReason =
+          data.reason ||
+          data.message ||
+          data.failure_reason ||
+          "Paystack transfer was reversed";
+
+        withdrawal.processedAt =
+          withdrawal.processedAt ||
+          new Date();
+
+        withdrawal.failedAt =
+          new Date();
+
+        await withdrawal.save();
+
+        console.warn(
+          "Vendora seller withdrawal reversed:",
+          {
+            withdrawalId:
+              withdrawal._id,
+
+            seller:
+              withdrawal.seller,
+
+            amount:
+              withdrawal.amount,
+
+            reason:
+              withdrawal.failureReason,
+          }
+        );
+
+        return res.status(200).json({
+          success: true,
+          message:
+            "Seller withdrawal reversal recorded",
+        });
+      }
+
+      // =================================================
+      // IMPORTANT:
+      // CLOSE SELLER TRANSFER EVENT BLOCK
+      // =================================================
+    }
+
+    // =================================================
+    // REFUND EVENTS
+    // =================================================
+
+    // =================================================
     // FIND REFUND
-    //
-    // We primarily use Paystack's refund ID.
-    // If unavailable, fall back to the transaction
-    // reference stored in Vendora.
     // =================================================
     let refund = null;
 
     if (data.id) {
       refund =
         await Refund.findOne({
-          paystackRefundId: String(
-            data.id
-          ),
+          paystackRefundId:
+            String(data.id),
         });
     }
 
-    if (!refund && data.transaction) {
+    if (
+      !refund &&
+      data.transaction
+    ) {
       const transactionReference =
         typeof data.transaction ===
         "object"
@@ -120,8 +658,8 @@ router.post("/", async (req, res) => {
                 "pending",
                 "processing",
               ],
-          },
-        });
+            },
+          });
       }
     }
 
@@ -136,8 +674,6 @@ router.post("/", async (req, res) => {
         }
       );
 
-      // Return 200 so Paystack does not repeatedly retry
-      // an event that Vendora cannot associate.
       return res.status(200).json({
         success: true,
         message:
@@ -159,8 +695,11 @@ router.post("/", async (req, res) => {
     // =================================================
     // REFUND PENDING
     // =================================================
-    if (event === "refund.pending") {
-      refund.status = "pending";
+    if (
+      event === "refund.pending"
+    ) {
+      refund.status =
+        "pending";
 
       await refund.save();
 
@@ -177,7 +716,8 @@ router.post("/", async (req, res) => {
     if (
       event === "refund.processing"
     ) {
-      refund.status = "processing";
+      refund.status =
+        "processing";
 
       await refund.save();
 
@@ -195,7 +735,8 @@ router.post("/", async (req, res) => {
       event ===
       "refund.needs-attention"
     ) {
-      refund.status = "processing";
+      refund.status =
+        "processing";
 
       refund.failureReason =
         data.failure_reason ||
@@ -214,8 +755,11 @@ router.post("/", async (req, res) => {
     // =================================================
     // REFUND FAILED
     // =================================================
-    if (event === "refund.failed") {
-      refund.status = "failed";
+    if (
+      event === "refund.failed"
+    ) {
+      refund.status =
+        "failed";
 
       refund.failureReason =
         data.failure_reason ||
@@ -237,9 +781,7 @@ router.post("/", async (req, res) => {
     // =================================================
     // REFUND PROCESSED
     //
-    // THIS IS THE IMPORTANT EVENT.
-    //
-    // Only here do we update:
+    // ONLY HERE DO WE UPDATE:
     // - Refund
     // - Payment
     // - Order
@@ -310,7 +852,8 @@ router.post("/", async (req, res) => {
 
       const previousRefundedAmount =
         Number(
-          payment.refundedAmount || 0
+          payment.refundedAmount ||
+            0
         );
 
       // -----------------------------------------------
@@ -391,15 +934,19 @@ router.post("/", async (req, res) => {
         const orderAmount =
           Number(payment.amount);
 
-        for (const earning of earnings) {
+        for (
+          const earning of earnings
+        ) {
           const grossAmount =
             Number(
-              earning.grossAmount || 0
+              earning.grossAmount ||
+                0
             );
 
           const netAmount =
             Number(
-              earning.netAmount || 0
+              earning.netAmount ||
+                0
             );
 
           if (
@@ -411,27 +958,33 @@ router.post("/", async (req, res) => {
           }
 
           // -------------------------------------------
-          // Allocate the customer's refund
-          // proportionally to this seller's gross sale.
+          // ALLOCATE REFUND PROPORTIONALLY
           // -------------------------------------------
           const sellerRefundGross =
             refundAmount *
-            (grossAmount /
-              Number(order.subtotal || orderAmount));
+            (
+              grossAmount /
+              Number(
+                order.subtotal ||
+                  orderAmount
+              )
+            );
 
           // -------------------------------------------
-          // Convert the gross refund into the seller's
-          // net earning portion.
+          // CONVERT GROSS REFUND TO NET EARNING
           // -------------------------------------------
           const sellerRefundNet =
             Math.min(
               netAmount -
                 Number(
-                  earning.refundedAmount || 0
+                  earning.refundedAmount ||
+                    0
                 ),
               sellerRefundGross *
-                (netAmount /
-                  grossAmount)
+                (
+                  netAmount /
+                  grossAmount
+                )
             );
 
           if (
@@ -442,7 +995,8 @@ router.post("/", async (req, res) => {
 
           earning.refundedAmount =
             Number(
-              earning.refundedAmount || 0
+              earning.refundedAmount ||
+                0
             ) +
             sellerRefundNet;
 
@@ -451,7 +1005,8 @@ router.post("/", async (req, res) => {
               netAmount -
                 earning.refundedAmount -
                 Number(
-                  earning.withdrawnAmount || 0
+                  earning.withdrawnAmount ||
+                    0
                 ),
               0
             );
@@ -472,10 +1027,15 @@ router.post("/", async (req, res) => {
               "partially_refunded";
           }
 
-          // Prevent reserved money from becoming
-          // available after a refund.
+          // -------------------------------------------
+          // PREVENT RESERVED MONEY FROM BECOMING
+          // AVAILABLE AFTER REFUND
+          // -------------------------------------------
           if (
-            earning.reservedAmount >
+            Number(
+              earning.reservedAmount ||
+                0
+            ) >
             remainingSellerAmount
           ) {
             earning.reservedAmount =
@@ -514,7 +1074,7 @@ router.post("/", async (req, res) => {
     });
   } catch (error) {
     console.error(
-      "Paystack refund webhook error:",
+      "Paystack webhook error:",
       error
     );
 

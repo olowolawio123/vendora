@@ -14,9 +14,13 @@ import {
   CheckCheck,
   Trash2,
   CircleHelp,
+  MessageSquare,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import apiFetch from "../services/apiFetch";
+import { getConversations } from "../services/messageService";
 import {
   getUnreadNotificationCount,
   getNotifications,
@@ -25,21 +29,26 @@ import {
   deleteNotification,
 } from "../services/notificationService";
 
-const API_URL = import.meta.env.VITE_API_URL;
-
-const Navbar = () => {
+const Navbar = ({
+  darkMode,
+  toggleDarkMode,
+}) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] =
+    useState(false);
 
   const [cartCount, setCartCount] = useState(0);
 
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const [messageUnreadCount, setMessageUnreadCount] =
+    useState(0);
 
   const loadCartCount = async () => {
     if (!user) {
@@ -95,8 +104,40 @@ const Navbar = () => {
         "Unable to load notification count:",
         error
       );
+    }
+  };
 
-      setUnreadCount(0);
+  const loadMessageUnreadCount = async () => {
+    if (!user) {
+      setMessageUnreadCount(0);
+      return;
+    }
+
+    try {
+      const data = await getConversations();
+
+      const conversations =
+        data.conversations || [];
+
+      const totalUnread =
+        conversations.reduce(
+          (total, conversation) => {
+            const unread =
+              user.role === "buyer"
+                ? conversation?.buyerUnreadCount || 0
+                : conversation?.sellerUnreadCount || 0;
+
+            return total + Number(unread);
+          },
+          0
+        );
+
+      setMessageUnreadCount(totalUnread);
+    } catch (error) {
+      console.error(
+        "Unable to load message unread count:",
+        error
+      );
     }
   };
 
@@ -126,6 +167,39 @@ const Navbar = () => {
 
   useEffect(() => {
     loadNotificationCount();
+  }, [user]);
+
+  useEffect(() => {
+    loadMessageUnreadCount();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      loadNotificationCount();
+    }, 4000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setMessageUnreadCount(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      loadMessageUnreadCount();
+    }, 4000);
+
+    return () => {
+      clearInterval(interval);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -205,10 +279,30 @@ const Navbar = () => {
       }
 
       setNotificationOpen(false);
+      setMobileOpen(false);
 
-      if (notification.order?._id) {
+      const conversationId =
+        typeof notification.conversation ===
+        "object"
+          ? notification.conversation?._id
+          : notification.conversation;
+
+      if (conversationId) {
         navigate(
-          `/account/orders/${notification.order._id}`
+          `/messages?conversation=${conversationId}`
+        );
+
+        return;
+      }
+
+      const orderId =
+        typeof notification.order === "object"
+          ? notification.order?._id
+          : notification.order;
+
+      if (orderId) {
+        navigate(
+          `/account/orders/${orderId}`
         );
       }
     } catch (error) {
@@ -301,6 +395,7 @@ const Navbar = () => {
 
     if (!query) {
       navigate("/products");
+      setMobileOpen(false);
       return;
     }
 
@@ -319,6 +414,7 @@ const Navbar = () => {
 
       setCartCount(0);
       setUnreadCount(0);
+      setMessageUnreadCount(0);
       setNotifications([]);
 
       setAccountOpen(false);
@@ -341,7 +437,7 @@ const Navbar = () => {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
+    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white transition-colors duration-200 dark:border-gray-800 dark:bg-gray-900">
       <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between gap-6">
 
@@ -351,11 +447,11 @@ const Navbar = () => {
             onClick={closeMenus}
             className="flex shrink-0 flex-col"
           >
-            <span className="text-2xl font-bold tracking-tight text-gray-950">
+            <span className="text-2xl font-bold tracking-tight text-gray-950 dark:text-white">
               Vendora
             </span>
 
-            <span className="text-[11px] font-medium tracking-wide text-gray-500">
+            <span className="text-[11px] font-medium tracking-wide text-gray-500 dark:text-gray-400">
               Buy. Sell. Connect.
             </span>
           </Link>
@@ -379,7 +475,7 @@ const Navbar = () => {
                   setSearch(event.target.value)
                 }
                 placeholder="Search products, brands and categories..."
-                className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-11 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:bg-white focus:ring-2 focus:ring-gray-100"
+                className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-11 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:bg-white focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-gray-600 dark:focus:bg-gray-800 dark:focus:ring-gray-700"
               />
             </div>
           </form>
@@ -387,35 +483,89 @@ const Navbar = () => {
           {/* DESKTOP NAVIGATION */}
           <div className="hidden items-center gap-1 lg:flex">
 
+            {/* PRODUCTS */}
             <Link
               to="/products"
-              className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950"
+              className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               Products
             </Link>
 
+            {/* MESSAGES */}
+            {user && (
+              <Link
+                to="/messages"
+                className="relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
+              >
+                <MessageSquare size={17} />
+                Messages
+
+                {messageUnreadCount > 0 && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white dark:bg-white dark:text-gray-950">
+                    {messageUnreadCount > 99
+                      ? "99+"
+                      : messageUnreadCount}
+                  </span>
+                )}
+              </Link>
+            )}
+
             {/* HELP CENTER */}
             <Link
               to="/help-center"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               <CircleHelp size={17} />
               Help
             </Link>
 
+            {/* SELL */}
             <Link
               to="/become-a-seller"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               <Store size={17} />
               Sell
             </Link>
 
+            {/* THEME TOGGLE */}
+            <button
+              type="button"
+              onClick={toggleDarkMode}
+              className="rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
+              aria-label={
+                darkMode
+                  ? "Switch to light mode"
+                  : "Switch to dark mode"
+              }
+              title={
+                darkMode
+                  ? "Light mode"
+                  : "Dark mode"
+              }
+            >
+              {darkMode ? (
+                <Sun
+                  size={21}
+                  strokeWidth={1.9}
+                />
+              ) : (
+                <Moon
+                  size={21}
+                  strokeWidth={1.9}
+                />
+              )}
+            </button>
+
             {/* WISHLIST */}
             <button
               type="button"
-              onClick={() => navigate("/wishlist")}
-              className="rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+              onClick={() => {
+                setNotificationOpen(false);
+                setAccountOpen(false);
+                navigate("/wishlist");
+              }}
+              className="rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
               aria-label="Wishlist"
               title="Wishlist"
             >
@@ -433,7 +583,7 @@ const Navbar = () => {
                   onClick={
                     handleNotificationToggle
                   }
-                  className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+                  className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
                   aria-label="Notifications"
                   title="Notifications"
                 >
@@ -443,7 +593,7 @@ const Navbar = () => {
                   />
 
                   {unreadCount > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white">
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white dark:bg-white dark:text-gray-950">
                       {unreadCount > 99
                         ? "99+"
                         : unreadCount}
@@ -452,17 +602,16 @@ const Navbar = () => {
                 </button>
 
                 {notificationOpen && (
-                  <div className="absolute right-0 top-12 w-96 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+                  <div className="absolute right-0 top-12 w-96 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
 
-                    {/* HEADER */}
-                    <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                    <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-900">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                           Notifications
                         </h3>
 
                         {unreadCount > 0 && (
-                          <p className="mt-0.5 text-xs text-gray-500">
+                          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                             {unreadCount} unread
                           </p>
                         )}
@@ -474,7 +623,7 @@ const Navbar = () => {
                           onClick={
                             handleMarkAllAsRead
                           }
-                          className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-950"
+                          className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-950 dark:text-gray-400 dark:hover:text-white"
                         >
                           <CheckCheck
                             size={15}
@@ -484,117 +633,133 @@ const Navbar = () => {
                       )}
                     </div>
 
-                    {/* NOTIFICATIONS */}
                     <div className="max-h-[420px] overflow-y-auto">
                       {notifications.length === 0 ? (
                         <div className="px-6 py-10 text-center">
                           <Bell
                             size={30}
-                            className="mx-auto text-gray-300"
+                            className="mx-auto text-gray-300 dark:text-gray-600"
                           />
 
-                          <p className="mt-3 text-sm font-medium text-gray-900">
+                          <p className="mt-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                             No notifications
                           </p>
 
-                          <p className="mt-1 text-xs text-gray-500">
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             You're all caught up.
                           </p>
                         </div>
                       ) : (
                         notifications.map(
-                          (notification) => (
-                            <div
-                              key={
-                                notification._id
-                              }
-                              onClick={() =>
-                                handleNotificationClick(
-                                  notification
-                                )
-                              }
-                              className={`group cursor-pointer border-b border-gray-100 px-4 py-3 transition hover:bg-gray-50 ${
-                                !notification.isRead
-                                  ? "bg-gray-50"
-                                  : "bg-white"
-                              }`}
-                            >
-                              <div className="flex gap-3">
+                          (notification) => {
+                            const isMessageNotification =
+                              Boolean(
+                                notification.conversation
+                              );
 
-                                <div className="mt-0.5 shrink-0">
-                                  <div
-                                    className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                                      notification.isRead
-                                        ? "bg-gray-100"
-                                        : "bg-gray-950"
-                                    }`}
-                                  >
-                                    <Bell
-                                      size={16}
-                                      className={
-                                        notification.isRead
-                                          ? "text-gray-500"
-                                          : "text-white"
-                                      }
-                                    />
-                                  </div>
-                                </div>
+                            return (
+                              <div
+                                key={
+                                  notification._id
+                                }
+                                onClick={() =>
+                                  handleNotificationClick(
+                                    notification
+                                  )
+                                }
+                                className={`group cursor-pointer border-b border-gray-100 px-4 py-3 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800 ${
+                                  !notification.isRead
+                                    ? "bg-gray-50 dark:bg-gray-800"
+                                    : "bg-white dark:bg-gray-900"
+                                }`}
+                              >
+                                <div className="flex gap-3">
 
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <p
-                                      className={`text-sm ${
+                                  <div className="mt-0.5 shrink-0">
+                                    <div
+                                      className={`flex h-9 w-9 items-center justify-center rounded-full ${
                                         notification.isRead
-                                          ? "font-medium text-gray-700"
-                                          : "font-semibold text-gray-950"
+                                          ? "bg-gray-100 dark:bg-gray-700"
+                                          : "bg-gray-950 dark:bg-white"
                                       }`}
                                     >
+                                      {isMessageNotification ? (
+                                        <MessageSquare
+                                          size={16}
+                                          className={
+                                            notification.isRead
+                                              ? "text-gray-500 dark:text-gray-300"
+                                              : "text-white dark:text-gray-950"
+                                          }
+                                        />
+                                      ) : (
+                                        <Bell
+                                          size={16}
+                                          className={
+                                            notification.isRead
+                                              ? "text-gray-500 dark:text-gray-300"
+                                              : "text-white dark:text-gray-950"
+                                          }
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p
+                                        className={`text-sm ${
+                                          notification.isRead
+                                            ? "font-medium text-gray-700 dark:text-gray-300"
+                                            : "font-semibold text-gray-950 dark:text-white"
+                                        }`}
+                                      >
+                                        {
+                                          notification.title
+                                        }
+                                      </p>
+
+                                      <button
+                                        type="button"
+                                        onClick={(
+                                          event
+                                        ) =>
+                                          handleDeleteNotification(
+                                            event,
+                                            notification._id
+                                          )
+                                        }
+                                        className="shrink-0 rounded p-1 text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-white"
+                                        aria-label="Delete notification"
+                                        title="Delete notification"
+                                      >
+                                        <Trash2
+                                          size={14}
+                                        />
+                                      </button>
+                                    </div>
+
+                                    <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
                                       {
-                                        notification.title
+                                        notification.message
                                       }
                                     </p>
 
-                                    <button
-                                      type="button"
-                                      onClick={(
-                                        event
-                                      ) =>
-                                        handleDeleteNotification(
-                                          event,
-                                          notification._id
-                                        )
-                                      }
-                                      className="shrink-0 rounded p-1 text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100"
-                                      aria-label="Delete notification"
-                                      title="Delete notification"
-                                    >
-                                      <Trash2
-                                        size={14}
-                                      />
-                                    </button>
+                                    <p className="mt-1.5 text-[10px] text-gray-400">
+                                      {formatNotificationTime(
+                                        notification.createdAt
+                                      )}
+                                    </p>
                                   </div>
-
-                                  <p className="mt-1 text-xs leading-5 text-gray-600">
-                                    {
-                                      notification.message
-                                    }
-                                  </p>
-
-                                  <p className="mt-1.5 text-[10px] text-gray-400">
-                                    {formatNotificationTime(
-                                      notification.createdAt
-                                    )}
-                                  </p>
                                 </div>
                               </div>
-                            </div>
-                          )
+                            );
+                          }
                         )
                       )}
                     </div>
 
-                    {/* FOOTER */}
-                    <div className="border-t border-gray-100 px-4 py-3">
+                    <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
                       <button
                         type="button"
                         onClick={() => {
@@ -605,7 +770,7 @@ const Navbar = () => {
                             "/notifications"
                           );
                         }}
-                        className="w-full text-center text-xs font-semibold text-gray-700 hover:text-gray-950"
+                        className="w-full text-center text-xs font-semibold text-gray-700 hover:text-gray-950 dark:text-gray-300 dark:hover:text-white"
                       >
                         View all notifications
                       </button>
@@ -618,8 +783,10 @@ const Navbar = () => {
             {/* CART */}
             <button
               type="button"
-              onClick={() => navigate("/cart")}
-              className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+              onClick={() =>
+                navigate("/cart")
+              }
+              className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
               aria-label="Shopping cart"
               title="Shopping cart"
             >
@@ -629,7 +796,7 @@ const Navbar = () => {
               />
 
               {cartCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white">
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white dark:bg-white dark:text-gray-950">
                   {cartCount > 99
                     ? "99+"
                     : cartCount}
@@ -645,23 +812,23 @@ const Navbar = () => {
                   setAccountOpen(!accountOpen);
                   setNotificationOpen(false);
                 }}
-                className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 transition hover:bg-gray-50"
+                className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
                   <User
                     size={17}
-                    className="text-gray-700"
+                    className="text-gray-700 dark:text-gray-200"
                   />
                 </div>
 
                 <div className="hidden text-left xl:block">
-                  <p className="max-w-28 truncate text-xs font-semibold text-gray-900">
+                  <p className="max-w-28 truncate text-xs font-semibold text-gray-900 dark:text-gray-100">
                     {user
                       ? user.name
                       : "Account"}
                   </p>
 
-                  <p className="text-[10px] text-gray-500">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     {user
                       ? "My account"
                       : "Sign in"}
@@ -670,15 +837,15 @@ const Navbar = () => {
               </button>
 
               {accountOpen && (
-                <div className="absolute right-0 top-12 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-2 shadow-xl">
+                <div className="absolute right-0 top-12 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-2 shadow-xl dark:border-gray-700 dark:bg-gray-900">
                   {user ? (
                     <>
-                      <div className="border-b border-gray-100 px-4 py-3">
-                        <p className="truncate text-sm font-semibold text-gray-900">
+                      <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+                        <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                           {user.name}
                         </p>
 
-                        <p className="truncate text-xs text-gray-500">
+                        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                           {user.email}
                         </p>
                       </div>
@@ -686,26 +853,48 @@ const Navbar = () => {
                       <Link
                         to="/account"
                         onClick={closeMenus}
-                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         <User size={17} />
                         My Account
                       </Link>
 
                       <Link
+                        to="/messages"
+                        onClick={closeMenus}
+                        className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                      >
+                        <span className="flex items-center gap-3">
+                          <MessageSquare
+                            size={17}
+                          />
+                          Messages
+                        </span>
+
+                        {messageUnreadCount >
+                          0 && (
+                          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white dark:bg-white dark:text-gray-950">
+                            {messageUnreadCount >
+                            99
+                              ? "99+"
+                              : messageUnreadCount}
+                          </span>
+                        )}
+                      </Link>
+
+                      <Link
                         to="/wishlist"
                         onClick={closeMenus}
-                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         <Heart size={17} />
                         My Wishlist
                       </Link>
 
-                      {/* MY SUPPORT REQUESTS */}
                       <Link
                         to="/my-support-requests"
                         onClick={closeMenus}
-                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         <CircleHelp size={17} />
                         My Support Requests
@@ -715,7 +904,7 @@ const Navbar = () => {
                         <Link
                           to="/seller"
                           onClick={closeMenus}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                         >
                           <LayoutDashboard
                             size={17}
@@ -727,7 +916,7 @@ const Navbar = () => {
                       <button
                         type="button"
                         onClick={handleLogout}
-                        className="flex w-full items-center gap-3 border-t border-gray-100 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+                        className="flex w-full items-center gap-3 border-t border-gray-100 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         <LogOut size={17} />
                         Logout
@@ -736,11 +925,11 @@ const Navbar = () => {
                   ) : (
                     <>
                       <div className="px-4 py-3">
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                           Welcome to Vendora
                         </p>
 
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           Sign in to manage your
                           account.
                         </p>
@@ -749,7 +938,7 @@ const Navbar = () => {
                       <Link
                         to="/login"
                         onClick={closeMenus}
-                        className="mx-3 flex items-center justify-center rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800"
+                        className="mx-3 flex items-center justify-center rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200"
                       >
                         Sign In
                       </Link>
@@ -757,7 +946,7 @@ const Navbar = () => {
                       <Link
                         to="/register"
                         onClick={closeMenus}
-                        className="mx-3 mt-2 flex items-center justify-center rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                        className="mx-3 mt-2 flex items-center justify-center rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         Create Account
                       </Link>
@@ -769,53 +958,37 @@ const Navbar = () => {
           </div>
 
           {/* MOBILE HEADER */}
-          <div className="flex items-center gap-1 lg:hidden">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1 lg:hidden">
 
-            {/* MOBILE WISHLIST */}
+            {/* MOBILE SEARCH */}
             <button
               type="button"
-              onClick={() =>
-                navigate("/wishlist")
-              }
-              aria-label="Wishlist"
-              title="Wishlist"
-              className="rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+              onClick={() => {
+                setMobileOpen(true);
+                setNotificationOpen(false);
+                setAccountOpen(false);
+              }}
+              aria-label="Search products"
+              title="Search products"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
-              <Heart size={21} />
+              <Search
+                size={21}
+                strokeWidth={1.9}
+              />
             </button>
-
-            {/* MOBILE NOTIFICATIONS */}
-            {user && (
-              <button
-                type="button"
-                onClick={
-                  handleNotificationToggle
-                }
-                aria-label="Notifications"
-                title="Notifications"
-                className="relative rounded-lg p-2.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
-              >
-                <Bell size={21} />
-
-                {unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold text-white">
-                    {unreadCount > 99
-                      ? "99+"
-                      : unreadCount}
-                  </span>
-                )}
-              </button>
-            )}
 
             {/* MOBILE CART */}
             <button
               type="button"
-              onClick={() =>
-                navigate("/cart")
-              }
+              onClick={() => {
+                setMobileOpen(false);
+                setNotificationOpen(false);
+                navigate("/cart");
+              }}
               aria-label="Shopping cart"
               title="Shopping cart"
-              className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-950"
+              className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               <ShoppingCart
                 size={21}
@@ -823,7 +996,7 @@ const Navbar = () => {
               />
 
               {cartCount > 0 && (
-                <span className="absolute right-0 top-0 flex h-4 min-w-4 translate-x-1/4 -translate-y-1/4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white">
+                <span className="absolute right-0 top-0 flex h-4 min-w-4 translate-x-1/4 -translate-y-1/4 items-center justify-center rounded-full bg-gray-950 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:bg-white dark:text-gray-950 dark:ring-gray-900">
                   {cartCount > 99
                     ? "99+"
                     : cartCount}
@@ -834,20 +1007,33 @@ const Navbar = () => {
             {/* MOBILE MENU */}
             <button
               type="button"
-              onClick={() =>
-                setMobileOpen(!mobileOpen)
-              }
+              onClick={() => {
+                setMobileOpen((current) => !current);
+                setNotificationOpen(false);
+                setAccountOpen(false);
+              }}
               aria-label={
                 mobileOpen
                   ? "Close menu"
                   : "Open menu"
               }
-              className="rounded-lg p-2.5 text-gray-700 hover:bg-gray-100"
+              title={
+                mobileOpen
+                  ? "Close menu"
+                  : "Open menu"
+              }
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
             >
               {mobileOpen ? (
-                <X size={23} />
+                <X
+                  size={23}
+                  strokeWidth={1.9}
+                />
               ) : (
-                <Menu size={23} />
+                <Menu
+                  size={23}
+                  strokeWidth={1.9}
+                />
               )}
             </button>
           </div>
@@ -855,17 +1041,17 @@ const Navbar = () => {
 
         {/* MOBILE NOTIFICATIONS PANEL */}
         {notificationOpen && (
-          <div className="border-t border-gray-100 bg-white py-3 lg:hidden">
-            <div className="overflow-hidden rounded-xl border border-gray-200">
+          <div className="border-t border-gray-100 bg-white py-3 dark:border-gray-800 dark:bg-gray-900 lg:hidden">
+            <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
 
-              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                     Notifications
                   </h3>
 
                   {unreadCount > 0 && (
-                    <p className="mt-0.5 text-xs text-gray-500">
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                       {unreadCount} unread
                     </p>
                   )}
@@ -877,7 +1063,7 @@ const Navbar = () => {
                     onClick={
                       handleMarkAllAsRead
                     }
-                    className="flex items-center gap-1.5 text-xs font-medium text-gray-600"
+                    className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300"
                   >
                     <CheckCheck size={15} />
                     Mark all as read
@@ -890,106 +1076,125 @@ const Navbar = () => {
                   <div className="px-6 py-10 text-center">
                     <Bell
                       size={30}
-                      className="mx-auto text-gray-300"
+                      className="mx-auto text-gray-300 dark:text-gray-600"
                     />
 
-                    <p className="mt-3 text-sm font-medium text-gray-900">
+                    <p className="mt-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                       No notifications
                     </p>
 
-                    <p className="mt-1 text-xs text-gray-500">
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       You're all caught up.
                     </p>
                   </div>
                 ) : (
                   notifications.map(
-                    (notification) => (
-                      <div
-                        key={notification._id}
-                        onClick={() =>
-                          handleNotificationClick(
-                            notification
-                          )
-                        }
-                        className={`border-b border-gray-100 px-4 py-3 ${
-                          !notification.isRead
-                            ? "bg-gray-50"
-                            : "bg-white"
-                        }`}
-                      >
-                        <div className="flex gap-3">
-                          <div className="mt-0.5 shrink-0">
-                            <div
-                              className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                                notification.isRead
-                                  ? "bg-gray-100"
-                                  : "bg-gray-950"
-                              }`}
-                            >
-                              <Bell
-                                size={16}
-                                className={
+                    (notification) => {
+                      const isMessageNotification =
+                        Boolean(
+                          notification.conversation
+                        );
+
+                      return (
+                        <div
+                          key={notification._id}
+                          onClick={() =>
+                            handleNotificationClick(
+                              notification
+                            )
+                          }
+                          className={`cursor-pointer border-b border-gray-100 px-4 py-3 dark:border-gray-800 ${
+                            !notification.isRead
+                              ? "bg-gray-50 dark:bg-gray-800"
+                              : "bg-white dark:bg-gray-900"
+                          }`}
+                        >
+                          <div className="flex gap-3">
+
+                            <div className="mt-0.5 shrink-0">
+                              <div
+                                className={`flex h-9 w-9 items-center justify-center rounded-full ${
                                   notification.isRead
-                                    ? "text-gray-500"
-                                    : "text-white"
-                                }
-                              />
-                            </div>
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <p
-                              className={`text-sm ${
-                                notification.isRead
-                                  ? "font-medium text-gray-700"
-                                  : "font-semibold text-gray-950"
-                              }`}
-                            >
-                              {
-                                notification.title
-                              }
-                            </p>
-
-                            <p className="mt-1 text-xs leading-5 text-gray-600">
-                              {
-                                notification.message
-                              }
-                            </p>
-
-                            <div className="mt-2 flex items-center justify-between">
-                              <p className="text-[10px] text-gray-400">
-                                {formatNotificationTime(
-                                  notification.createdAt
+                                    ? "bg-gray-100 dark:bg-gray-700"
+                                    : "bg-gray-950 dark:bg-white"
+                                }`}
+                              >
+                                {isMessageNotification ? (
+                                  <MessageSquare
+                                    size={16}
+                                    className={
+                                      notification.isRead
+                                        ? "text-gray-500 dark:text-gray-300"
+                                        : "text-white dark:text-gray-950"
+                                    }
+                                  />
+                                ) : (
+                                  <Bell
+                                    size={16}
+                                    className={
+                                      notification.isRead
+                                        ? "text-gray-500 dark:text-gray-300"
+                                        : "text-white dark:text-gray-950"
+                                    }
+                                  />
                                 )}
+                              </div>
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <p
+                                className={`text-sm ${
+                                  notification.isRead
+                                    ? "font-medium text-gray-700 dark:text-gray-300"
+                                    : "font-semibold text-gray-950 dark:text-white"
+                                }`}
+                              >
+                                {
+                                  notification.title
+                                }
                               </p>
 
-                              <button
-                                type="button"
-                                onClick={(
-                                  event
-                                ) =>
-                                  handleDeleteNotification(
-                                    event,
-                                    notification._id
-                                  )
+                              <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+                                {
+                                  notification.message
                                 }
-                                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                                aria-label="Delete notification"
-                              >
-                                <Trash2
-                                  size={14}
-                                />
-                              </button>
+                              </p>
+
+                              <div className="mt-2 flex items-center justify-between">
+                                <p className="text-[10px] text-gray-400">
+                                  {formatNotificationTime(
+                                    notification.createdAt
+                                  )}
+                                </p>
+
+                                <button
+                                  type="button"
+                                  onClick={(
+                                    event
+                                  ) =>
+                                    handleDeleteNotification(
+                                      event,
+                                      notification._id
+                                    )
+                                  }
+                                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-white"
+                                  aria-label="Delete notification"
+                                >
+                                  <Trash2
+                                    size={14}
+                                  />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )
+                      );
+                    }
                   )
                 )}
               </div>
 
-              <div className="border-t border-gray-100 px-4 py-3">
+              <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
                 <button
                   type="button"
                   onClick={() => {
@@ -998,7 +1203,7 @@ const Navbar = () => {
                       "/notifications"
                     );
                   }}
-                  className="w-full text-center text-xs font-semibold text-gray-700"
+                  className="w-full text-center text-xs font-semibold text-gray-700 dark:text-gray-300"
                 >
                   View all notifications
                 </button>
@@ -1009,7 +1214,7 @@ const Navbar = () => {
 
         {/* MOBILE MENU */}
         {mobileOpen && (
-          <div className="border-t border-gray-100 py-4 lg:hidden">
+          <div className="border-t border-gray-100 py-4 dark:border-gray-800 lg:hidden">
 
             {/* MOBILE SEARCH */}
             <form
@@ -1029,7 +1234,8 @@ const Navbar = () => {
                     setSearch(event.target.value)
                   }
                   placeholder="Search products..."
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm outline-none focus:border-gray-400 focus:bg-white"
+                  autoFocus
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm text-gray-900 outline-none focus:border-gray-400 focus:bg-white dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-gray-600 dark:focus:bg-gray-800"
                 />
               </div>
             </form>
@@ -1040,16 +1246,42 @@ const Navbar = () => {
               <Link
                 to="/products"
                 onClick={closeMenus}
-                className="flex items-center rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex items-center rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 Products
               </Link>
+
+              {/* MESSAGES */}
+              {user && (
+                <Link
+                  to="/messages"
+                  onClick={closeMenus}
+                  className="flex items-center justify-between rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  <span className="flex items-center gap-3">
+                    <MessageSquare
+                      size={18}
+                    />
+                    Messages
+                  </span>
+
+                  {messageUnreadCount >
+                    0 && (
+                    <span className="rounded-full bg-gray-950 px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-white dark:text-gray-950">
+                      {messageUnreadCount >
+                      99
+                        ? "99+"
+                        : messageUnreadCount}
+                    </span>
+                  )}
+                </Link>
+              )}
 
               {/* HELP CENTER */}
               <Link
                 to="/help-center"
                 onClick={closeMenus}
-                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 <CircleHelp size={18} />
                 Help Center
@@ -1059,7 +1291,7 @@ const Navbar = () => {
               <Link
                 to="/wishlist"
                 onClick={closeMenus}
-                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 <Heart size={18} />
                 My Wishlist
@@ -1072,7 +1304,7 @@ const Navbar = () => {
                   onClick={
                     handleNotificationToggle
                   }
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   <span className="flex items-center gap-3">
                     <Bell size={18} />
@@ -1080,7 +1312,7 @@ const Navbar = () => {
                   </span>
 
                   {unreadCount > 0 && (
-                    <span className="rounded-full bg-gray-950 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    <span className="rounded-full bg-gray-950 px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-white dark:text-gray-950">
                       {unreadCount > 99
                         ? "99+"
                         : unreadCount}
@@ -1089,11 +1321,28 @@ const Navbar = () => {
                 </button>
               )}
 
+              {/* THEME */}
+              <button
+                type="button"
+                onClick={toggleDarkMode}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                {darkMode ? (
+                  <Sun size={18} />
+                ) : (
+                  <Moon size={18} />
+                )}
+
+                {darkMode
+                  ? "Light Mode"
+                  : "Dark Mode"}
+              </button>
+
               {/* SELL */}
               <Link
                 to="/become-a-seller"
                 onClick={closeMenus}
-                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 <Store size={18} />
                 Become a Seller
@@ -1105,7 +1354,7 @@ const Navbar = () => {
                   <Link
                     to="/account"
                     onClick={closeMenus}
-                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <User size={18} />
                     My Account
@@ -1115,7 +1364,7 @@ const Navbar = () => {
                   <Link
                     to="/my-support-requests"
                     onClick={closeMenus}
-                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <CircleHelp size={18} />
                     My Support Requests
@@ -1126,7 +1375,7 @@ const Navbar = () => {
                     <Link
                       to="/seller"
                       onClick={closeMenus}
-                      className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                     >
                       <LayoutDashboard
                         size={18}
@@ -1139,19 +1388,19 @@ const Navbar = () => {
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <LogOut size={18} />
                     Logout
                   </button>
                 </>
               ) : (
-                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-100 pt-4">
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
 
                   <Link
                     to="/login"
                     onClick={closeMenus}
-                    className="flex items-center justify-center rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700"
+                    className="flex items-center justify-center rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
                   >
                     Sign In
                   </Link>
@@ -1159,7 +1408,7 @@ const Navbar = () => {
                   <Link
                     to="/register"
                     onClick={closeMenus}
-                    className="flex items-center justify-center rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-medium text-white"
+                    className="flex items-center justify-center rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-medium text-white dark:bg-white dark:text-gray-950"
                   >
                     Register
                   </Link>

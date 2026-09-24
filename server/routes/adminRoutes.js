@@ -9,6 +9,7 @@ const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
 const Payment = require("../models/Payment");
 const Refund = require("../models/Refund");
+const Coupon = require("../models/Coupon");
 const {
   refundTransaction,
 } = require("../services/paystackRefundService");
@@ -1077,6 +1078,698 @@ router.post(
         success: false,
         message:
           "Unable to process refund",
+      });
+    }
+  }
+);
+
+// =====================================================
+// GET ALL COUPONS
+// ADMIN ONLY
+// =====================================================
+router.get(
+  "/coupons",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const coupons = await Coupon.find({})
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({
+        success: true,
+        count: coupons.length,
+        coupons,
+      });
+    } catch (error) {
+      console.error(
+        "Get admin coupons error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to load coupons",
+      });
+    }
+  }
+);
+
+// =====================================================
+// CREATE COUPON
+// ADMIN ONLY
+// =====================================================
+router.post(
+  "/coupons",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const {
+        code,
+        description = "",
+        discountType,
+        discountValue,
+        minimumOrderAmount = 0,
+        maximumDiscountAmount = null,
+        usageLimit = null,
+        expiresAt = null,
+        isActive = true,
+      } = req.body;
+
+      // =================================================
+      // VALIDATE CODE
+      // =================================================
+      if (!code || !code.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Coupon code is required",
+        });
+      }
+
+      const cleanCode = code
+        .trim()
+        .toUpperCase();
+
+      // =================================================
+      // VALIDATE DISCOUNT TYPE
+      // =================================================
+      if (
+        !["percentage", "fixed"].includes(
+          discountType
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Discount type must be percentage or fixed",
+        });
+      }
+
+      // =================================================
+      // VALIDATE DISCOUNT VALUE
+      // =================================================
+      const numericDiscountValue =
+        Number(discountValue);
+
+      if (
+        !Number.isFinite(
+          numericDiscountValue
+        ) ||
+        numericDiscountValue <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Discount value must be greater than zero",
+        });
+      }
+
+      // Percentage cannot exceed 100%
+      if (
+        discountType === "percentage" &&
+        numericDiscountValue > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Percentage discount cannot exceed 100%",
+        });
+      }
+
+      // =================================================
+      // VALIDATE MINIMUM ORDER AMOUNT
+      // =================================================
+      const numericMinimumOrder =
+        Number(minimumOrderAmount);
+
+      if (
+        !Number.isFinite(
+          numericMinimumOrder
+        ) ||
+        numericMinimumOrder < 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Minimum order amount cannot be negative",
+        });
+      }
+
+      // =================================================
+      // VALIDATE MAXIMUM DISCOUNT
+      // =================================================
+      let numericMaximumDiscount = null;
+
+      if (
+        maximumDiscountAmount !== null &&
+        maximumDiscountAmount !== "" &&
+        maximumDiscountAmount !== undefined
+      ) {
+        numericMaximumDiscount =
+          Number(maximumDiscountAmount);
+
+        if (
+          !Number.isFinite(
+            numericMaximumDiscount
+          ) ||
+          numericMaximumDiscount <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Maximum discount amount must be greater than zero",
+          });
+        }
+      }
+
+      // =================================================
+      // VALIDATE USAGE LIMIT
+      // =================================================
+      let numericUsageLimit = null;
+
+      if (
+        usageLimit !== null &&
+        usageLimit !== "" &&
+        usageLimit !== undefined
+      ) {
+        numericUsageLimit =
+          Number(usageLimit);
+
+        if (
+          !Number.isInteger(
+            numericUsageLimit
+          ) ||
+          numericUsageLimit <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Usage limit must be a positive whole number",
+          });
+        }
+      }
+
+      // =================================================
+      // VALIDATE EXPIRY DATE
+      // =================================================
+      let couponExpiryDate = null;
+
+      if (
+        expiresAt !== null &&
+        expiresAt !== "" &&
+        expiresAt !== undefined
+      ) {
+        couponExpiryDate = new Date(
+          expiresAt
+        );
+
+        if (
+          Number.isNaN(
+            couponExpiryDate.getTime()
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid coupon expiry date",
+          });
+        }
+      }
+
+      // =================================================
+      // CHECK DUPLICATE CODE
+      // =================================================
+      const existingCoupon =
+        await Coupon.findOne({
+          code: cleanCode,
+        });
+
+      if (existingCoupon) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "A coupon with this code already exists",
+        });
+      }
+
+      // =================================================
+      // CREATE COUPON
+      // =================================================
+      const coupon = await Coupon.create({
+        code: cleanCode,
+        description:
+          description.trim(),
+        discountType,
+        discountValue:
+          numericDiscountValue,
+        minimumOrderAmount:
+          numericMinimumOrder,
+        maximumDiscountAmount:
+          numericMaximumDiscount,
+        usageLimit:
+          numericUsageLimit,
+        expiresAt:
+          couponExpiryDate,
+        isActive:
+          Boolean(isActive),
+      });
+
+      res.status(201).json({
+        success: true,
+        message:
+          "Coupon created successfully",
+        coupon,
+      });
+    } catch (error) {
+      console.error(
+        "Create admin coupon error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Unable to create coupon",
+      });
+    }
+  }
+);
+
+// =====================================================
+// UPDATE COUPON
+// ADMIN ONLY
+// =====================================================
+router.patch(
+  "/coupons/:couponId",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const {
+        code,
+        description,
+        discountType,
+        discountValue,
+        minimumOrderAmount,
+        maximumDiscountAmount,
+        usageLimit,
+        expiresAt,
+        isActive,
+      } = req.body;
+
+      const coupon =
+        await Coupon.findById(
+          req.params.couponId
+        );
+
+      if (!coupon) {
+        return res.status(404).json({
+          success: false,
+          message: "Coupon not found",
+        });
+      }
+
+      // =================================================
+      // UPDATE CODE
+      // =================================================
+      if (
+        code !== undefined &&
+        code.trim()
+      ) {
+        const cleanCode = code
+          .trim()
+          .toUpperCase();
+
+        const duplicate =
+          await Coupon.findOne({
+            code: cleanCode,
+            _id: {
+              $ne: coupon._id,
+            },
+          });
+
+        if (duplicate) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "Another coupon already uses this code",
+          });
+        }
+
+        coupon.code = cleanCode;
+      }
+
+      // =================================================
+      // UPDATE DESCRIPTION
+      // =================================================
+      if (
+        description !== undefined
+      ) {
+        coupon.description =
+          description.trim();
+      }
+
+      // =================================================
+      // UPDATE DISCOUNT TYPE
+      // =================================================
+      if (
+        discountType !== undefined
+      ) {
+        if (
+          !["percentage", "fixed"].includes(
+            discountType
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Discount type must be percentage or fixed",
+          });
+        }
+
+        coupon.discountType =
+          discountType;
+      }
+
+      // =================================================
+      // UPDATE DISCOUNT VALUE
+      // =================================================
+      if (
+        discountValue !== undefined
+      ) {
+        const numericValue =
+          Number(discountValue);
+
+        if (
+          !Number.isFinite(
+            numericValue
+          ) ||
+          numericValue <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Discount value must be greater than zero",
+          });
+        }
+
+        const finalDiscountType =
+          discountType ||
+          coupon.discountType;
+
+        if (
+          finalDiscountType ===
+            "percentage" &&
+          numericValue > 100
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Percentage discount cannot exceed 100%",
+          });
+        }
+
+        coupon.discountValue =
+          numericValue;
+      }
+
+      // =================================================
+      // UPDATE MINIMUM ORDER
+      // =================================================
+      if (
+        minimumOrderAmount !==
+        undefined
+      ) {
+        const numericMinimum =
+          Number(
+            minimumOrderAmount
+          );
+
+        if (
+          !Number.isFinite(
+            numericMinimum
+          ) ||
+          numericMinimum < 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Minimum order amount cannot be negative",
+          });
+        }
+
+        coupon.minimumOrderAmount =
+          numericMinimum;
+      }
+
+      // =================================================
+      // UPDATE MAXIMUM DISCOUNT
+      // =================================================
+      if (
+        maximumDiscountAmount !==
+        undefined
+      ) {
+        if (
+          maximumDiscountAmount ===
+            null ||
+          maximumDiscountAmount === ""
+        ) {
+          coupon.maximumDiscountAmount =
+            null;
+        } else {
+          const numericMaximum =
+            Number(
+              maximumDiscountAmount
+            );
+
+          if (
+            !Number.isFinite(
+              numericMaximum
+            ) ||
+            numericMaximum <= 0
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Maximum discount amount must be greater than zero",
+            });
+          }
+
+          coupon.maximumDiscountAmount =
+            numericMaximum;
+        }
+      }
+
+      // =================================================
+      // UPDATE USAGE LIMIT
+      // =================================================
+      if (
+        usageLimit !== undefined
+      ) {
+        if (
+          usageLimit === null ||
+          usageLimit === ""
+        ) {
+          coupon.usageLimit = null;
+        } else {
+          const numericUsageLimit =
+            Number(usageLimit);
+
+          if (
+            !Number.isInteger(
+              numericUsageLimit
+            ) ||
+            numericUsageLimit <= 0
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Usage limit must be a positive whole number",
+            });
+          }
+
+          if (
+            numericUsageLimit <
+            coupon.usedCount
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Usage limit cannot be lower than the number of times this coupon has already been used",
+            });
+          }
+
+          coupon.usageLimit =
+            numericUsageLimit;
+        }
+      }
+
+      // =================================================
+      // UPDATE EXPIRY DATE
+      // =================================================
+      if (
+        expiresAt !== undefined
+      ) {
+        if (
+          expiresAt === null ||
+          expiresAt === ""
+        ) {
+          coupon.expiresAt = null;
+        } else {
+          const newExpiry =
+            new Date(expiresAt);
+
+          if (
+            Number.isNaN(
+              newExpiry.getTime()
+            )
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid coupon expiry date",
+            });
+          }
+
+          coupon.expiresAt =
+            newExpiry;
+        }
+      }
+
+      // =================================================
+      // UPDATE ACTIVE STATUS
+      // =================================================
+      if (
+        isActive !== undefined
+      ) {
+        coupon.isActive =
+          Boolean(isActive);
+      }
+
+      await coupon.save();
+
+      res.status(200).json({
+        success: true,
+        message:
+          "Coupon updated successfully",
+        coupon,
+      });
+    } catch (error) {
+      console.error(
+        "Update admin coupon error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Unable to update coupon",
+      });
+    }
+  }
+);
+
+// =====================================================
+// TOGGLE COUPON ACTIVE STATUS
+// ADMIN ONLY
+// =====================================================
+router.patch(
+  "/coupons/:couponId/toggle",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const coupon =
+        await Coupon.findById(
+          req.params.couponId
+        );
+
+      if (!coupon) {
+        return res.status(404).json({
+          success: false,
+          message: "Coupon not found",
+        });
+      }
+
+      coupon.isActive =
+        !coupon.isActive;
+
+      await coupon.save();
+
+      res.status(200).json({
+        success: true,
+        message: coupon.isActive
+          ? "Coupon activated successfully"
+          : "Coupon deactivated successfully",
+        coupon,
+      });
+    } catch (error) {
+      console.error(
+        "Toggle admin coupon error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Unable to change coupon status",
+      });
+    }
+  }
+);
+
+// =====================================================
+// DELETE COUPON
+// ADMIN ONLY
+// =====================================================
+router.delete(
+  "/coupons/:couponId",
+  protect,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const coupon =
+        await Coupon.findById(
+          req.params.couponId
+        );
+
+      if (!coupon) {
+        return res.status(404).json({
+          success: false,
+          message: "Coupon not found",
+        });
+      }
+
+      // Do not delete a coupon that has
+      // already been used.
+      if (coupon.usedCount > 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "A coupon that has already been used cannot be deleted. Deactivate it instead.",
+        });
+      }
+
+      await Coupon.findByIdAndDelete(
+        coupon._id
+      );
+
+      res.status(200).json({
+        success: true,
+        message:
+          "Coupon deleted successfully",
+      });
+    } catch (error) {
+      console.error(
+        "Delete admin coupon error:",
+        error.message
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Unable to delete coupon",
       });
     }
   }

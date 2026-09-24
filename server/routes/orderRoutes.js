@@ -12,6 +12,8 @@ const SellerEarning = require("../models/SellerEarning");
 const protect = require("../middleware/authMiddleware");
 const Notification = require("../models/Notification");
 const Withdrawal = require("../models/Withdrawal");
+const Coupon = require("../models/Coupon");
+
 const {
   createTransfer,
 } = require("../services/paystackTransferService");
@@ -104,6 +106,72 @@ router.get(
       return res.status(500).json({
         success: false,
         message: "Unable to load banks",
+      });
+    }
+  }
+);
+
+/*
+  SELLER PAYOUT - GET SAVED PAYOUT ACCOUNT
+
+  GET /api/orders/seller-payout
+*/
+router.get(
+  "/seller-payout",
+  protect,
+  async (req, res) => {
+    try {
+      const seller = await Seller.findOne({
+        user: req.user.userId,
+        status: "approved",
+      });
+
+      if (!seller) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only approved sellers can manage payout information",
+        });
+      }
+
+      const payout = seller.payout;
+
+      if (
+        !payout ||
+        !payout.bankCode ||
+        !payout.accountNumber
+      ) {
+        return res.json({
+          success: true,
+          payout: null,
+        });
+      }
+
+      return res.json({
+        success: true,
+        payout: {
+          bankCode: payout.bankCode || "",
+          bankName: payout.bankName || "",
+          accountNumber:
+            payout.accountNumber || "",
+          accountName:
+            payout.accountName || "",
+          verified:
+            Boolean(payout.verified),
+          verifiedAt:
+            payout.verifiedAt || null,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Get seller payout account error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load payout account",
       });
     }
   }
@@ -401,10 +469,12 @@ router.get(
                 earning.netAmount || 0
               ) -
                 Number(
-                  earning.withdrawnAmount || 0
+                  earning.withdrawnAmount ||
+                    0
                 ) -
                 Number(
-                  earning.reservedAmount || 0
+                  earning.reservedAmount ||
+                    0
                 )
             ),
           0
@@ -1036,6 +1106,12 @@ router.post(
   SELLER WITHDRAWAL - PROCESS TEST/REAL TRANSFER
 
   POST /api/orders/seller-withdrawal/process
+
+  IMPORTANT:
+  Paystack webhook is the final authority for:
+  - transfer.success
+  - transfer.failed
+  - transfer.reversed
 */
 router.post(
   "/seller-withdrawal/process",
@@ -1056,12 +1132,24 @@ router.post(
       }
 
       const withdrawal =
-        await Withdrawal.findOne({
-          seller: seller._id,
-          status: "pending",
-        }).sort({
-          createdAt: 1,
-        });
+        await Withdrawal.findOneAndUpdate(
+          {
+            seller: seller._id,
+            status: "pending",
+          },
+          {
+            $set: {
+              status: "processing",
+              processedAt: new Date(),
+            },
+          },
+          {
+            sort: {
+              createdAt: 1,
+            },
+            new: true,
+          }
+        );
 
       if (!withdrawal) {
         return res.status(400).json({
@@ -1074,21 +1162,17 @@ router.post(
       const withdrawalEarnings =
         await SellerEarning.find({
           seller: seller._id,
-          withdrawal:
-            withdrawal._id,
-          status:
-            "withdrawal_pending",
+          withdrawal: withdrawal._id,
+          status: "withdrawal_pending",
         });
 
       if (!withdrawalEarnings.length) {
-        withdrawal.status =
-          "cancelled";
+        withdrawal.status = "failed";
 
         withdrawal.failureReason =
           "No reserved earnings found for this withdrawal";
 
-        withdrawal.failedAt =
-          new Date();
+        withdrawal.failedAt = new Date();
 
         await withdrawal.save();
 
@@ -1111,11 +1195,9 @@ router.post(
 
       if (
         reservedAmount <= 0 ||
-        Math.round(
-          reservedAmount * 100
-        ) !==
+        Math.round(reservedAmount * 100) !==
           Math.round(
-            withdrawal.amount * 100
+            Number(withdrawal.amount) * 100
           )
       ) {
         return res.status(400).json({
@@ -1125,16 +1207,17 @@ router.post(
         });
       }
 
-      withdrawal.status =
-        "processing";
+      if (!withdrawal.transferReference) {
+        withdrawal.transferReference =
+          `vendora-wd-${Date.now()}-${crypto
+            .randomBytes(4)
+            .toString("hex")}`;
 
-      await withdrawal.save();
+        await withdrawal.save();
+      }
 
       const transferReference =
-        `VENDORA-WD-${Date.now()}-${crypto
-          .randomBytes(4)
-          .toString("hex")
-          .toUpperCase()}`;
+        withdrawal.transferReference;
 
       let transferResult;
 
@@ -1155,43 +1238,24 @@ router.post(
               "Vendora seller withdrawal",
           });
       } catch (transferError) {
-        for (
-          const earning of withdrawalEarnings
-        ) {
-          earning.reservedAmount = 0;
+        console.error(
+          "Paystack transfer request error:",
+          transferError
+        );
 
-          earning.withdrawal = null;
-
-          earning.status =
-            "available";
-
-          await earning.save();
-        }
-
-        withdrawal.status =
-          "failed";
+        withdrawal.status = "processing";
 
         withdrawal.failureReason =
           transferError.message ||
-          "Paystack transfer failed";
-
-        withdrawal.transferReference =
-          transferReference;
-
-        withdrawal.failedAt =
-          new Date();
-
-        withdrawal.processedAt =
-          new Date();
+          "Transfer request could not be confirmed. Transfer remains under review.";
 
         await withdrawal.save();
 
-        return res.status(400).json({
+        return res.status(202).json({
           success: false,
 
           message:
-            transferError.message ||
-            "Paystack transfer failed",
+            "The transfer request could not be confirmed. The withdrawal remains processing to prevent a duplicate payout.",
 
           withdrawal: {
             id:
@@ -1206,17 +1270,25 @@ router.post(
             status:
               withdrawal.status,
 
+            transferReference:
+              withdrawal.transferReference,
+
             failureReason:
               withdrawal.failureReason,
+
+            processedAt:
+              withdrawal.processedAt,
           },
         });
       }
 
       const transferData =
-        transferResult.data || {};
+        transferResult?.data || {};
 
       withdrawal.transferCode =
-        transferData.transfer_code || "";
+        transferData.transfer_code ||
+        withdrawal.transferCode ||
+        "";
 
       withdrawal.transferReference =
         transferData.reference ||
@@ -1225,79 +1297,17 @@ router.post(
       withdrawal.paystackResponse =
         transferData;
 
-      withdrawal.processedAt =
-        new Date();
+      withdrawal.status = "processing";
 
-      if (
-        transferData.status ===
-        "success"
-      ) {
-        withdrawal.status =
-          "successful";
-
-        withdrawal.completedAt =
-          new Date();
-
-        for (
-          const earning of withdrawalEarnings
-        ) {
-          const reserved =
-            Number(
-              earning.reservedAmount || 0
-            );
-
-          if (reserved <= 0) {
-            continue;
-          }
-
-          earning.withdrawnAmount =
-            Number(
-              earning.withdrawnAmount || 0
-            ) + reserved;
-
-          earning.reservedAmount =
-            0;
-
-          earning.withdrawal =
-            withdrawal._id;
-
-          const remainingAmount =
-            Math.max(
-              0,
-              Number(
-                earning.netAmount || 0
-              ) -
-                Number(
-                  earning.withdrawnAmount ||
-                    0
-                )
-            );
-
-          if (remainingAmount > 0) {
-            earning.status =
-              "available";
-          } else {
-            earning.status =
-              "withdrawn";
-          }
-
-          await earning.save();
-        }
-      } else {
-        withdrawal.status =
-          "processing";
-      }
+      withdrawal.failureReason = "";
 
       await withdrawal.save();
 
-      return res.json({
+      return res.status(200).json({
         success: true,
 
         message:
-          withdrawal.status ===
-          "successful"
-            ? "Withdrawal transferred successfully"
-            : "Withdrawal transfer is being processed",
+          "Withdrawal transfer submitted and is awaiting Paystack confirmation",
 
         withdrawal: {
           id:
@@ -1331,7 +1341,7 @@ router.post(
             withdrawal.processedAt,
 
           completedAt:
-            withdrawal.completedAt,
+            withdrawal.completedAt || null,
         },
       });
     } catch (error) {
@@ -1373,6 +1383,8 @@ router.post(
   "/",
   protect,
   async (req, res) => {
+    const session = await mongoose.startSession();
+
     try {
       const {
         fullName,
@@ -1380,6 +1392,7 @@ router.post(
         address,
         city,
         state,
+        couponCode,
       } = req.body;
 
       if (
@@ -1502,19 +1515,10 @@ router.post(
       for (
         const cartItem of cart.items
       ) {
-        /*
-          Never access product properties
-          before checking that the product exists.
-        */
         if (!cartItem.product) {
           continue;
         }
 
-        /*
-          Reload the product directly so we check
-          the current status instead of relying only
-          on the populated cart snapshot.
-        */
         const product =
           await Product.findOne({
             _id:
@@ -1548,9 +1552,6 @@ router.post(
           });
         }
 
-        /*
-          Seller must still be approved.
-        */
         if (
           product.seller.status !==
           "approved"
@@ -1562,10 +1563,6 @@ router.post(
           });
         }
 
-        /*
-          The seller's User account must also
-          still be active.
-        */
         if (
           !product.seller.user ||
           product.seller.user.status !==
@@ -1578,9 +1575,6 @@ router.post(
           });
         }
 
-        /*
-          Validate quantity.
-        */
         const quantity =
           Number(
             cartItem.quantity
@@ -1599,9 +1593,6 @@ router.post(
           });
         }
 
-        /*
-          Validate current stock.
-        */
         if (
           product.stock <
           quantity
@@ -1657,62 +1648,487 @@ router.post(
         });
       }
 
+      /*
+        Round the server-calculated subtotal.
+        Never trust a subtotal sent from the frontend.
+      */
+      subtotal =
+        Math.round(
+          subtotal * 100
+        ) / 100;
+
       const deliveryFee = 0;
 
+      /*
+        ==========================================
+        COUPON INFORMATION
+        ==========================================
+
+        Coupon validation is performed again here
+        using the server-calculated subtotal.
+
+        The frontend is NOT trusted for the discount.
+      */
+      let discount = 0;
+      let appliedCouponCode = "";
+      let couponId = null;
+
+      if (
+        couponCode &&
+        String(couponCode).trim()
+      ) {
+        const normalizedCouponCode =
+          String(couponCode)
+            .trim()
+            .toUpperCase();
+
+        /*
+          First validation before opening the
+          transaction.
+        */
+        const coupon =
+          await Coupon.findOne({
+            code:
+              normalizedCouponCode,
+          });
+
+        if (!coupon) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid coupon code",
+          });
+        }
+
+        if (!coupon.isActive) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "This coupon is no longer active",
+          });
+        }
+
+        if (
+          coupon.expiresAt &&
+          new Date(
+            coupon.expiresAt
+          ) <= new Date()
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "This coupon has expired",
+          });
+        }
+
+        if (
+          coupon.usageLimit !== null &&
+          coupon.usedCount >=
+            coupon.usageLimit
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "This coupon has reached its usage limit",
+          });
+        }
+
+        const minimumOrderAmount =
+          Number(
+            coupon.minimumOrderAmount || 0
+          );
+
+        if (
+          subtotal <
+          minimumOrderAmount
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `Minimum order amount for this coupon is ₦${minimumOrderAmount.toLocaleString()}`,
+          });
+        }
+
+        /*
+          Calculate discount on the server.
+        */
+        if (
+          coupon.discountType ===
+          "percentage"
+        ) {
+          discount =
+            subtotal *
+            (
+              Number(
+                coupon.discountValue
+              ) / 100
+            );
+
+          if (
+            coupon.maximumDiscountAmount !==
+              null &&
+            discount >
+              Number(
+                coupon.maximumDiscountAmount
+              )
+          ) {
+            discount =
+              Number(
+                coupon.maximumDiscountAmount
+              );
+          }
+        } else if (
+          coupon.discountType ===
+          "fixed"
+        ) {
+          discount =
+            Number(
+              coupon.discountValue
+            );
+        }
+
+        /*
+          A coupon can never discount more than
+          the product subtotal.
+        */
+        discount =
+          Math.min(
+            discount,
+            subtotal
+          );
+
+        discount =
+          Math.max(
+            discount,
+            0
+          );
+
+        discount =
+          Math.round(
+            discount * 100
+          ) / 100;
+
+        appliedCouponCode =
+          coupon.code;
+
+        couponId =
+          coupon._id;
+      }
+
+      /*
+        Final order total.
+
+        Coupon discount is platform-funded, so the
+        seller's gross item amounts remain unchanged.
+      */
       const total =
-        subtotal +
-        deliveryFee;
+        Math.round(
+          Math.max(
+            subtotal +
+              deliveryFee -
+              discount,
+            0
+          ) * 100
+        ) / 100;
 
-      const order =
-        await Order.create({
-          orderNumber:
-            generateOrderNumber(),
+      /*
+        ==========================================
+        CREATE ORDER + RESERVE COUPON ATOMICALLY
+        ==========================================
 
-          buyer:
-            req.user.userId,
+        This prevents the following problem:
 
-          items:
-            orderItems,
+        1. Coupon usage is increased.
+        2. Order creation fails.
+        3. Coupon usage remains increased.
 
-          deliveryAddress: {
-            fullName:
-              String(
-                fullName
-              ).trim(),
+        Both operations now succeed or fail together.
+      */
+      let order;
 
-            phone:
-              String(
-                phone
-              ).trim(),
+      await session.withTransaction(
+        async () => {
+          /*
+            If a coupon was supplied, re-check it
+            inside the transaction immediately before
+            creating the order.
 
-            address:
-              String(
-                address
-              ).trim(),
+            This protects against another buyer using
+            the final available coupon at the same time.
+          */
+          if (couponId) {
+            const couponFilter = {
+              _id:
+                couponId,
 
-            city:
-              String(
-                city
-              ).trim(),
+              code:
+                appliedCouponCode,
 
-            state:
-              String(
-                state
-              ).trim(),
-          },
+              isActive:
+                true,
 
-          subtotal,
+              ...(couponCode
+                ? {
+                    $or: [
+                      {
+                        expiresAt:
+                          null,
+                      },
+                      {
+                        expiresAt: {
+                          $gt:
+                            new Date(),
+                        },
+                      },
+                    ],
+                  }
+                : {}),
+            };
 
-          deliveryFee,
+            /*
+              If the coupon has a usage limit,
+              require usedCount to still be below
+              that limit.
+            */
+            if (couponId) {
+              const currentCoupon =
+                await Coupon.findOne(
+                  couponFilter
+                ).session(
+                  session
+                );
 
-          total,
+              if (!currentCoupon) {
+                throw new Error(
+                  "COUPON_NO_LONGER_AVAILABLE"
+                );
+              }
 
-          paymentStatus:
-            "pending",
+              if (
+                currentCoupon.usageLimit !==
+                  null &&
+                currentCoupon.usedCount >=
+                  currentCoupon.usageLimit
+              ) {
+                throw new Error(
+                  "COUPON_USAGE_LIMIT_REACHED"
+                );
+              }
 
-          orderStatus:
-            "pending",
-        });
+              const currentMinimum =
+                Number(
+                  currentCoupon.minimumOrderAmount ||
+                    0
+                );
+
+              if (
+                subtotal <
+                currentMinimum
+              ) {
+                throw new Error(
+                  "COUPON_MINIMUM_ORDER_NOT_MET"
+                );
+              }
+
+              /*
+                Recalculate the discount from the
+                current database coupon values.
+              */
+              let finalDiscount = 0;
+
+              if (
+                currentCoupon.discountType ===
+                "percentage"
+              ) {
+                finalDiscount =
+                  subtotal *
+                  (
+                    Number(
+                      currentCoupon.discountValue
+                    ) / 100
+                  );
+
+                if (
+                  currentCoupon.maximumDiscountAmount !==
+                    null &&
+                  finalDiscount >
+                    Number(
+                      currentCoupon.maximumDiscountAmount
+                    )
+                ) {
+                  finalDiscount =
+                    Number(
+                      currentCoupon.maximumDiscountAmount
+                    );
+                }
+              } else if (
+                currentCoupon.discountType ===
+                "fixed"
+              ) {
+                finalDiscount =
+                  Number(
+                    currentCoupon.discountValue
+                  );
+              }
+
+              finalDiscount =
+                Math.min(
+                  finalDiscount,
+                  subtotal
+                );
+
+              finalDiscount =
+                Math.max(
+                  finalDiscount,
+                  0
+                );
+
+              discount =
+                Math.round(
+                  finalDiscount * 100
+                ) / 100;
+
+              /*
+                Atomically increase coupon usage.
+
+                The usage limit is part of the filter,
+                so two simultaneous orders cannot both
+                consume the final coupon usage.
+              */
+              const couponUsageUpdate =
+                await Coupon.findOneAndUpdate(
+                  {
+                    _id:
+                      currentCoupon._id,
+
+                    isActive:
+                      true,
+
+                    ...(currentCoupon.expiresAt
+                      ? {
+                          expiresAt: {
+                            $gt:
+                              new Date(),
+                          },
+                        }
+                      : {}),
+
+                    ...(currentCoupon.usageLimit !==
+                    null
+                      ? {
+                          $expr: {
+                            $lt: [
+                              "$usedCount",
+                              "$usageLimit",
+                            ],
+                          },
+                        }
+                      : {}),
+                  },
+                  {
+                    $inc: {
+                      usedCount: 1,
+                    },
+                  },
+                  {
+                    new: true,
+                    session,
+                  }
+                );
+
+              if (!couponUsageUpdate) {
+                throw new Error(
+                  "COUPON_NO_LONGER_AVAILABLE"
+                );
+              }
+
+              appliedCouponCode =
+                currentCoupon.code;
+            }
+          }
+
+          /*
+            Recalculate final total after the
+            transaction-level coupon validation.
+          */
+          const finalTotal =
+            Math.round(
+              Math.max(
+                subtotal +
+                  deliveryFee -
+                  discount,
+                0
+              ) * 100
+            ) / 100;
+
+          const createdOrders =
+            await Order.create(
+              [
+                {
+                  orderNumber:
+                    generateOrderNumber(),
+
+                  buyer:
+                    req.user.userId,
+
+                  items:
+                    orderItems,
+
+                  deliveryAddress: {
+                    fullName:
+                      String(
+                        fullName
+                      ).trim(),
+
+                    phone:
+                      String(
+                        phone
+                      ).trim(),
+
+                    address:
+                      String(
+                        address
+                      ).trim(),
+
+                    city:
+                      String(
+                        city
+                      ).trim(),
+
+                    state:
+                      String(
+                        state
+                      ).trim(),
+                  },
+
+                  subtotal,
+
+                  couponCode:
+                    appliedCouponCode,
+
+                  discount,
+
+                  deliveryFee,
+
+                  total:
+                    finalTotal,
+
+                  paymentStatus:
+                    "pending",
+
+                  orderStatus:
+                    "pending",
+                },
+              ],
+              {
+                session,
+              }
+            );
+
+          order =
+            createdOrders[0];
+        }
+      );
 
       /*
         Notification failure must never make
@@ -1756,15 +2172,53 @@ router.post(
         error
       );
 
+      /*
+        Coupon-specific errors should return a
+        normal client error instead of a 500.
+      */
+      if (
+        error.message ===
+        "COUPON_NO_LONGER_AVAILABLE"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This coupon is no longer available. Please try another coupon.",
+        });
+      }
+
+      if (
+        error.message ===
+        "COUPON_USAGE_LIMIT_REACHED"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This coupon has reached its usage limit",
+        });
+      }
+
+      if (
+        error.message ===
+        "COUPON_MINIMUM_ORDER_NOT_MET"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "The minimum order amount for this coupon is no longer satisfied",
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message:
           "Unable to create order",
       });
+    } finally {
+      await session.endSession();
     }
   }
 );
-
 /*
   SELLER DASHBOARD
 
@@ -2180,38 +2634,71 @@ router.patch(
         });
       }
 
-      orderItem.status =
-        status;
+      orderItem.status = status;
+
+      /*
+        =====================================================
+        UPDATE OVERALL ORDER STATUS
+        =====================================================
+      */
+      const itemStatuses = order.items.map(
+        (item) => item.status || "pending"
+      );
+
+      if (
+        itemStatuses.every(
+          (itemStatus) =>
+            itemStatus === "delivered"
+        )
+      ) {
+        order.orderStatus =
+          "delivered";
+      } else if (
+        itemStatuses.every(
+          (itemStatus) =>
+            itemStatus === "cancelled"
+        )
+      ) {
+        order.orderStatus =
+          "cancelled";
+      } else if (
+        itemStatuses.some(
+          (itemStatus) =>
+            itemStatus === "shipped"
+        )
+      ) {
+        order.orderStatus =
+          "shipped";
+      } else if (
+        itemStatuses.some(
+          (itemStatus) =>
+            itemStatus === "processing"
+        )
+      ) {
+        order.orderStatus =
+          "processing";
+      } else {
+        order.orderStatus =
+          "pending";
+      }
 
       /*
         Seller earnings become available
         only when the seller marks the
         purchased item as delivered.
       */
-      if (
-        status === "delivered"
-      ) {
+      if (status === "delivered") {
         await SellerEarning.updateMany(
           {
-            seller:
-              seller._id,
-
-            order:
-              order._id,
-
-            product:
-              orderItem.product,
-
-            status:
-              "pending",
+            seller: seller._id,
+            order: order._id,
+            product: orderItem.product,
+            status: "pending",
           },
           {
             $set: {
-              status:
-                "available",
-
-              availableAt:
-                new Date(),
+              status: "available",
+              availableAt: new Date(),
             },
           }
         );
@@ -2335,6 +2822,211 @@ router.patch(
 );
 
 /*
+  VALIDATE COUPON
+
+  POST /api/orders/validate-coupon
+*/
+router.post(
+  "/validate-coupon",
+  protect,
+  async (req, res) => {
+    try {
+      const {
+        code,
+        subtotal,
+      } = req.body;
+
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Coupon code is required",
+        });
+      }
+
+      const orderSubtotal =
+        Number(subtotal);
+
+      if (
+        !Number.isFinite(
+          orderSubtotal
+        ) ||
+        orderSubtotal < 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid order subtotal",
+        });
+      }
+
+      const normalizedCode =
+        String(code)
+          .trim()
+          .toUpperCase();
+
+      const coupon =
+        await Coupon.findOne({
+          code: normalizedCode,
+        });
+
+      if (!coupon) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Invalid coupon code",
+        });
+      }
+
+      if (!coupon.isActive) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This coupon is no longer active",
+        });
+      }
+
+      if (
+        coupon.expiresAt &&
+        new Date(coupon.expiresAt) <=
+          new Date()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This coupon has expired",
+        });
+      }
+
+      if (
+        coupon.usageLimit !== null &&
+        coupon.usedCount >=
+          coupon.usageLimit
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This coupon has reached its usage limit",
+        });
+      }
+
+      if (
+        orderSubtotal <
+        Number(
+          coupon.minimumOrderAmount ||
+            0
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Minimum order amount for this coupon is ₦${Number(
+              coupon.minimumOrderAmount ||
+                0
+            ).toLocaleString()}`,
+        });
+      }
+
+      let discount = 0;
+
+      if (
+        coupon.discountType ===
+        "percentage"
+      ) {
+        discount =
+          orderSubtotal *
+          (Number(
+            coupon.discountValue
+          ) / 100);
+
+        if (
+          coupon.maximumDiscountAmount !==
+            null &&
+          discount >
+            Number(
+              coupon.maximumDiscountAmount
+            )
+        ) {
+          discount = Number(
+            coupon.maximumDiscountAmount
+          );
+        }
+      } else {
+        discount = Number(
+          coupon.discountValue
+        );
+      }
+
+      discount = Math.min(
+        discount,
+        orderSubtotal
+      );
+
+      discount =
+        Math.round(
+          discount * 100
+        ) / 100;
+
+      const totalAfterDiscount =
+        Math.round(
+          (orderSubtotal -
+            discount) *
+            100
+        ) / 100;
+
+      return res.status(200).json({
+        success: true,
+
+        message:
+          "Coupon applied successfully",
+
+        coupon: {
+          code:
+            coupon.code,
+
+          description:
+            coupon.description,
+
+          discountType:
+            coupon.discountType,
+
+          discountValue:
+            coupon.discountValue,
+
+          minimumOrderAmount:
+            coupon.minimumOrderAmount,
+
+          maximumDiscountAmount:
+            coupon.maximumDiscountAmount,
+
+          expiresAt:
+            coupon.expiresAt,
+        },
+
+        discount,
+
+        subtotal:
+          orderSubtotal,
+
+        total:
+          totalAfterDiscount,
+      });
+    } catch (error) {
+      console.error(
+        "Validate coupon error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to validate coupon",
+      });
+    }
+  }
+);
+
+/*
   INITIALIZE PAYSTACK PAYMENT
 
   POST /api/orders/:orderId/pay
@@ -2344,13 +3036,6 @@ router.post(
   protect,
   async (req, res) => {
     try {
-      /*
-        IMPORTANT:
-        Validate orderId BEFORE querying MongoDB.
-
-        This prevents:
-        Cast to ObjectId failed
-      */
       if (
         !mongoose.Types.ObjectId.isValid(
           req.params.orderId
@@ -2391,11 +3076,6 @@ router.post(
         });
       }
 
-      /*
-        Make sure the order still contains
-        valid products and approved/active sellers
-        before opening Paystack.
-      */
       for (
         const item of order.items
       ) {
@@ -2478,6 +3158,12 @@ router.post(
         });
       }
 
+      /*
+        IMPORTANT:
+        order.total already includes the coupon
+        discount, so Paystack charges the
+        discounted amount.
+      */
       const amountInKobo =
         Math.round(
           Number(order.total) *
@@ -2516,6 +3202,15 @@ router.post(
 
                 buyerId:
                   req.user.userId.toString(),
+
+                couponCode:
+                  order.couponCode ||
+                  "",
+
+                discount:
+                  Number(
+                    order.discount || 0
+                  ),
               },
 
               callback_url:
@@ -2653,6 +3348,15 @@ router.post(
           orderNumber:
             order.orderNumber,
 
+          subtotal:
+            order.subtotal,
+
+          discount:
+            order.discount || 0,
+
+          couponCode:
+            order.couponCode || "",
+
           total:
             order.total,
         },
@@ -2685,10 +3389,6 @@ router.post(
       await mongoose.startSession();
 
     try {
-      /*
-        IMPORTANT:
-        Validate orderId BEFORE MongoDB query.
-      */
       if (
         !mongoose.Types.ObjectId.isValid(
           req.params.orderId
@@ -2744,10 +3444,6 @@ router.post(
         });
       }
 
-      /*
-        The reference being verified must match
-        the reference generated for this order.
-      */
       if (
         !order.paymentReference
       ) {
@@ -3321,38 +4017,42 @@ router.get(
   }
 );
 
+router.get(
+  "/my-orders",
+  protect,
+  async (req, res) => {
+    try {
+      const orders =
+        await Order.find({
+          buyer: req.user.userId,
+        })
+          .populate({
+            path: "items.seller",
+            select:
+              "storeName logo",
+          })
+          .sort({
+            createdAt: -1,
+          });
 
-
-router.get("/my-orders", protect, async (req, res) => {
-  try {
-    const orders = await Order.find({
-      buyer: req.user.userId,
-    })
-      .populate({
-        path: "items.seller",
-        select: "storeName logo",
-      })
-      .sort({
-        createdAt: -1,
+      return res.status(200).json({
+        success: true,
+        orders,
       });
+    } catch (error) {
+      console.error(
+        "Get my orders error:",
+        error
+      );
 
-    return res.status(200).json({
-      success: true,
-      orders,
-    });
-  } catch (error) {
-    console.error(
-      "Get my orders error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to load orders",
-    });
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load orders",
+      });
+    }
   }
-});
-
+);
 
 router.get(
   "/test-paystack-refund-connection",
@@ -3377,10 +4077,14 @@ router.get(
         }
       );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       return res.status(response.status).json({
-        success: response.ok && data?.status === true,
+        success:
+          response.ok &&
+          data?.status === true,
+
         message:
           data?.message ||
           "Paystack connection tested",
@@ -3400,6 +4104,7 @@ router.get(
     }
   }
 );
+
 /*
   GET SINGLE ORDER
 
@@ -3414,13 +4119,6 @@ router.get(
   protect,
   async (req, res) => {
     try {
-      /*
-        Validate ObjectId before querying MongoDB.
-
-        This prevents:
-        Cast to ObjectId failed
-        and returns a clean API response.
-      */
       if (
         !mongoose.Types.ObjectId.isValid(
           req.params.orderId

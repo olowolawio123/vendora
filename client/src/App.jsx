@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -38,12 +39,35 @@ import ResetPassword from "./pages/ResetPassword";
 import HelpCenter from "./pages/HelpCenter";
 import ContactSupport from "./pages/ContactSupport";
 import MySupportRequests from "./pages/MySupportRequests";
+import Messages from "./pages/Messages";
+import Footer from "./components/Footer";
 
 function App() {
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem("vendora_theme") === "dark";
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("vendora_theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("vendora_theme", "light");
+    }
+  }, [darkMode]);
+
+  const toggleDarkMode = () => {
+    setDarkMode((current) => !current);
+  };
+
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50 text-gray-900">
-        <Navbar />
+      <div className="min-h-screen bg-gray-50 text-gray-900 transition-colors duration-200 dark:bg-gray-950 dark:text-gray-100">
+        <Navbar
+          darkMode={darkMode}
+          toggleDarkMode={toggleDarkMode}
+        />
 
         <main className="min-h-[calc(100vh-80px)]">
           <Routes>
@@ -64,31 +88,34 @@ function App() {
               path="/verify-email"
               element={<VerifyEmail />}
             />
+
             {/* RESET PASSWORD */}
-<Route
-  path="/reset-password"
-  element={<ResetPassword />}
-/>
+            <Route
+              path="/reset-password"
+              element={<ResetPassword />}
+            />
 
+            {/* HELP CENTER */}
+            <Route
+              path="/help-center"
+              element={<HelpCenter />}
+            />
 
-{/* HELP CENTER */}
-<Route
-  path="/help-center"
-  element={<HelpCenter />}
-/>
+            <Route
+              path="/contact-support"
+              element={<ContactSupport />}
+            />
 
-<Route
-  path="/contact-support"
-  element={<ContactSupport />}
-/>
-
-<Route
-  path="/my-support-requests"
-  element={<MySupportRequests />}
-/>
+            <Route
+              path="/my-support-requests"
+              element={<MySupportRequests />}
+            />
 
             {/* PRODUCTS */}
-            <Route path="/products" element={<Products />} />
+            <Route
+              path="/products"
+              element={<Products />}
+            />
 
             {/* PRODUCT DETAILS */}
             <Route
@@ -127,12 +154,10 @@ function App() {
             />
 
             {/* PAYMENT CALLBACK */}
-            {/* PAYMENT CALLBACK */}
-<Route
-  path="/payment/callback"
-  element={<PaymentCallback />}
-/>
-        
+            <Route
+              path="/payment/callback"
+              element={<PaymentCallback />}
+            />
 
             {/* SELLER SETTINGS */}
             <Route
@@ -150,6 +175,16 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Notifications />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* MESSAGES */}
+            <Route
+              path="/messages"
+              element={
+                <ProtectedRoute>
+                  <Messages />
                 </ProtectedRoute>
               }
             />
@@ -253,16 +288,27 @@ function App() {
             {/* DEFAULT */}
             <Route
               path="/"
-              element={<Navigate to="/products" replace />}
+              element={
+                <Navigate
+                  to="/products"
+                  replace
+                />
+              }
             />
 
             {/* UNKNOWN ROUTES */}
             <Route
               path="*"
-              element={<Navigate to="/products" replace />}
+              element={
+                <Navigate
+                  to="/products"
+                  replace
+                />
+              }
             />
           </Routes>
         </main>
+         <Footer />
 
         <ToastContainer
           position="top-right"

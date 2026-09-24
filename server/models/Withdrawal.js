@@ -74,13 +74,11 @@ const withdrawalSchema = new mongoose.Schema(
     },
 
     transferReference: {
-      type: String,
-      default: "",
-      unique: true,
-      sparse: true,
-      trim: true,
-      index: true,
-    },
+  type: String,
+  unique: true,
+  sparse: true,
+  trim: true,
+},
 
     reason: {
       type: String,

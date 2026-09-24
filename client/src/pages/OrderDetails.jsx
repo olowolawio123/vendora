@@ -10,6 +10,8 @@ import {
   Truck,
   Clock3,
   XCircle,
+  Star,
+  Send,
 } from "lucide-react";
 import apiFetch from "../services/apiFetch";
 
@@ -19,6 +21,12 @@ const OrderDetails = () => {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [reviewForms, setReviewForms] = useState({});
+  const [reviewSubmitting, setReviewSubmitting] = useState({});
+  const [reviewMessages, setReviewMessages] = useState({});
+  const [reviewErrors, setReviewErrors] = useState({});
+  const [alreadyReviewed, setAlreadyReviewed] = useState({});
 
   useEffect(() => {
     const loadOrder = async () => {
@@ -124,6 +132,229 @@ const OrderDetails = () => {
     }
   };
 
+  const getProductId = (item) => {
+    if (!item?.product) {
+      return "";
+    }
+
+    if (typeof item.product === "object") {
+      return (
+        item.product._id ||
+        item.product.id ||
+        ""
+      );
+    }
+
+    return item.product;
+  };
+
+  const getReviewForm = (productId) => {
+    return (
+      reviewForms[productId] || {
+        rating: 0,
+        comment: "",
+      }
+    );
+  };
+
+  const updateReviewRating = (
+    productId,
+    rating
+  ) => {
+    setReviewForms((current) => ({
+      ...current,
+      [productId]: {
+        ...getReviewForm(productId),
+        rating,
+      },
+    }));
+
+    setReviewErrors((current) => ({
+      ...current,
+      [productId]: "",
+    }));
+  };
+
+  const updateReviewComment = (
+    productId,
+    comment
+  ) => {
+    setReviewForms((current) => ({
+      ...current,
+      [productId]: {
+        ...getReviewForm(productId),
+        comment,
+      },
+    }));
+
+    setReviewErrors((current) => ({
+      ...current,
+      [productId]: "",
+    }));
+  };
+
+  const submitReview = async (item) => {
+    const productId = getProductId(item);
+
+    if (!productId) {
+      setReviewErrors((current) => ({
+        ...current,
+        [productId]:
+          "Product information is missing.",
+      }));
+
+      return;
+    }
+
+    const form = getReviewForm(productId);
+
+    if (!form.rating) {
+      setReviewErrors((current) => ({
+        ...current,
+        [productId]:
+          "Please select a rating before submitting.",
+      }));
+
+      return;
+    }
+
+    setReviewSubmitting((current) => ({
+      ...current,
+      [productId]: true,
+    }));
+
+    setReviewErrors((current) => ({
+      ...current,
+      [productId]: "",
+    }));
+
+    setReviewMessages((current) => ({
+      ...current,
+      [productId]: "",
+    }));
+
+    try {
+      const response = await apiFetch(
+        "/api/reviews",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            orderId,
+            productId,
+            rating: form.rating,
+            comment: form.comment.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        /*
+         * The backend returns 409 when this buyer
+         * has already reviewed this product.
+         *
+         * We handle that here instead of displaying
+         * the message as a red error.
+         */
+        if (
+          response.status === 409 ||
+          data.message ===
+            "You have already reviewed this product"
+        ) {
+          setAlreadyReviewed((current) => ({
+            ...current,
+            [productId]: true,
+          }));
+
+          setReviewErrors((current) => ({
+            ...current,
+            [productId]: "",
+          }));
+
+          return;
+        }
+
+        throw new Error(
+          data.message || "Unable to submit review"
+        );
+      }
+
+      setReviewMessages((current) => ({
+        ...current,
+        [productId]:
+          "Review submitted successfully.",
+      }));
+
+      setReviewForms((current) => ({
+        ...current,
+        [productId]: {
+          rating: 0,
+          comment: "",
+        },
+      }));
+    } catch (error) {
+      console.error(
+        "Submit review error:",
+        error
+      );
+
+      setReviewErrors((current) => ({
+        ...current,
+        [productId]: error.message,
+      }));
+    } finally {
+      setReviewSubmitting((current) => ({
+        ...current,
+        [productId]: false,
+      }));
+    }
+  };
+
+  const renderReviewStars = (
+    productId,
+    selectedRating
+  ) => {
+    return (
+      <div className="flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            onClick={() =>
+              updateReviewRating(
+                productId,
+                rating
+              )
+            }
+            disabled={
+              reviewSubmitting[productId]
+            }
+            aria-label={`Rate ${rating} out of 5`}
+            className="rounded-md p-1 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Star
+              size={24}
+              fill={
+                rating <= selectedRating
+                  ? "currentColor"
+                  : "none"
+              }
+              className={
+                rating <= selectedRating
+                  ? "text-yellow-500"
+                  : "text-gray-300"
+              }
+            />
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -167,6 +398,10 @@ const OrderDetails = () => {
   if (!order) {
     return null;
   }
+
+  const canReview =
+    order.paymentStatus === "paid" &&
+    order.orderStatus === "delivered";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -233,7 +468,7 @@ const OrderDetails = () => {
               </div>
 
               <div className="divide-y divide-gray-100">
-                {order.items?.map((item) => {
+                {order.items?.map((item, index) => {
                   const statusStyles =
                     getStatusStyles(
                       item.status
@@ -242,9 +477,41 @@ const OrderDetails = () => {
                   const StatusIcon =
                     statusStyles.icon;
 
+                  const productId =
+                    getProductId(item);
+
+                  const reviewForm =
+                    getReviewForm(
+                      productId
+                    );
+
+                  const isSubmitting =
+                    reviewSubmitting[
+                      productId
+                    ];
+
+                  const reviewMessage =
+                    reviewMessages[
+                      productId
+                    ];
+
+                  const reviewError =
+                    reviewErrors[
+                      productId
+                    ];
+
+                  const hasAlreadyReviewed =
+                    alreadyReviewed[
+                      productId
+                    ];
+
                   return (
                     <div
-                      key={item.product}
+                      key={
+                        productId ||
+                        item._id ||
+                        index
+                      }
                       className="p-6"
                     >
                       <div className="flex gap-4">
@@ -333,6 +600,170 @@ const OrderDetails = () => {
                           </span>
                         </div>
                       </div>
+
+                      {/* REVIEW */}
+                      {canReview &&
+                        productId && (
+                          <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-5">
+                            <div className="flex items-start gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100">
+                                <Star
+                                  size={19}
+                                  className="text-gray-700"
+                                />
+                              </div>
+
+                              <div>
+                                <h3 className="font-bold text-gray-950">
+                                  Review this product
+                                </h3>
+
+                                <p className="mt-1 text-sm text-gray-500">
+                                  Share your experience
+                                  with other Vendora
+                                  buyers.
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Already reviewed */}
+                            {hasAlreadyReviewed ? (
+                              <div className="mt-5 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                                <CheckCircle2
+                                  size={20}
+                                  className="mt-0.5 shrink-0 text-blue-600"
+                                />
+
+                                <div>
+                                  <p className="font-semibold text-blue-900">
+                                    You've already reviewed
+                                    this product
+                                  </p>
+
+                                  <p className="mt-1 text-sm text-blue-700">
+                                    Thank you for sharing
+                                    your experience with
+                                    other Vendora buyers.
+                                  </p>
+                                </div>
+                              </div>
+                            ) : reviewMessage ? (
+                              <div className="mt-5 flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+                                <CheckCircle2
+                                  size={19}
+                                  className="mt-0.5 shrink-0"
+                                />
+
+                                <div>
+                                  <p className="font-semibold">
+                                    Review submitted
+                                  </p>
+
+                                  <p className="mt-1">
+                                    Your review has been
+                                    added successfully.
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="mt-5">
+                                  <p className="mb-2 text-sm font-semibold text-gray-900">
+                                    Your rating
+                                  </p>
+
+                                  {renderReviewStars(
+                                    productId,
+                                    reviewForm.rating
+                                  )}
+
+                                  {reviewForm.rating > 0 && (
+                                    <p className="mt-2 text-xs text-gray-500">
+                                      You selected{" "}
+                                      {
+                                        reviewForm.rating
+                                      }{" "}
+                                      out of 5
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="mt-5">
+                                  <label
+                                    htmlFor={`review-${productId}`}
+                                    className="mb-2 block text-sm font-semibold text-gray-900"
+                                  >
+                                    Your review
+                                  </label>
+
+                                  <textarea
+                                    id={`review-${productId}`}
+                                    value={
+                                      reviewForm.comment
+                                    }
+                                    onChange={(event) =>
+                                      updateReviewComment(
+                                        productId,
+                                        event.target
+                                          .value
+                                      )
+                                    }
+                                    disabled={
+                                      isSubmitting
+                                    }
+                                    rows={4}
+                                    maxLength={1000}
+                                    placeholder="Tell other buyers about your experience with this product..."
+                                    className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:bg-white focus:ring-2 focus:ring-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  />
+
+                                  <p className="mt-1 text-right text-xs text-gray-400">
+                                    {
+                                      reviewForm.comment
+                                        .length
+                                    }{" "}
+                                    / 1000
+                                  </p>
+                                </div>
+
+                                {reviewError && (
+                                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                    {reviewError}
+                                  </div>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    submitReview(
+                                      item
+                                    )
+                                  }
+                                  disabled={
+                                    isSubmitting ||
+                                    !reviewForm.rating
+                                  }
+                                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gray-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
+                                >
+                                  {isSubmitting ? (
+                                    <>
+                                      <LoaderCircle
+                                        size={18}
+                                        className="animate-spin"
+                                      />
+                                      Submitting...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Send size={17} />
+                                      Submit Review
+                                    </>
+                                  )}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
                     </div>
                   );
                 })}
@@ -450,6 +881,15 @@ const OrderDetails = () => {
 
                 <p className="mt-2 break-all text-xs text-gray-500">
                   {order.paymentReference}
+                </p>
+              </div>
+            )}
+
+            {!canReview && (
+              <div className="mt-6 border-t border-gray-100 pt-5">
+                <p className="text-xs leading-5 text-gray-400">
+                  Reviews become available after your
+                  paid order has been delivered.
                 </p>
               </div>
             )}

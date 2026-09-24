@@ -8,6 +8,8 @@ import {
   MapPin,
   Package,
   ShieldCheck,
+  Tag,
+  X,
 } from "lucide-react";
 import apiFetch from "../services/apiFetch";
 import { useAuth } from "../context/AuthContext";
@@ -19,7 +21,14 @@ const Checkout = () => {
   const [cart, setCart] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [processingPayment, setProcessingPayment] = useState(false);
+  const [processingPayment, setProcessingPayment] =
+    useState(false);
+
+  const [couponCode, setCouponCode] = useState("");
+  const [coupon, setCoupon] = useState(null);
+  const [couponLoading, setCouponLoading] =
+    useState(false);
+  const [couponError, setCouponError] = useState("");
 
   const [address, setAddress] = useState({
     fullName: user?.name || "",
@@ -33,7 +42,8 @@ const Checkout = () => {
     if (user?.name) {
       setAddress((previous) => ({
         ...previous,
-        fullName: previous.fullName || user.name,
+        fullName:
+          previous.fullName || user.name,
       }));
     }
   }, [user]);
@@ -61,21 +71,14 @@ const Checkout = () => {
 
         const loadedCart = data.cart;
 
-        /*
-          Remove stale cart items whose product was deleted
-          or is no longer available.
-        */
-        const validItems = Array.isArray(loadedCart?.items)
+        const validItems = Array.isArray(
+          loadedCart?.items
+        )
           ? loadedCart.items.filter(
               (item) => item?.product
             )
           : [];
 
-        /*
-          If stale items were found, update the cart locally
-          so Checkout never tries to access product.price
-          when product is null.
-        */
         if (
           loadedCart &&
           validItems.length !==
@@ -102,11 +105,10 @@ const Checkout = () => {
     loadCart();
   }, [navigate]);
 
-  /*
-    Only calculate totals from valid products.
-  */
   const validCartItems = useMemo(() => {
-    if (!cart?.items) return [];
+    if (!cart?.items) {
+      return [];
+    }
 
     return cart.items.filter(
       (item) => item?.product
@@ -125,6 +127,55 @@ const Checkout = () => {
       0
     );
   }, [validCartItems]);
+
+  const discountAmount = useMemo(() => {
+    if (!coupon) {
+      return 0;
+    }
+
+    const discountValue = Number(
+      coupon.discountValue || 0
+    );
+
+    let discount = 0;
+
+    if (
+      coupon.discountType === "percentage"
+    ) {
+      discount =
+        (subtotal * discountValue) / 100;
+
+      if (
+        coupon.maximumDiscountAmount !==
+          null &&
+        coupon.maximumDiscountAmount !==
+          undefined
+      ) {
+        discount = Math.min(
+          discount,
+          Number(
+            coupon.maximumDiscountAmount
+          )
+        );
+      }
+    }
+
+    if (
+      coupon.discountType === "fixed"
+    ) {
+      discount = discountValue;
+    }
+
+    return Math.min(
+      Math.max(discount, 0),
+      subtotal
+    );
+  }, [coupon, subtotal]);
+
+  const finalTotal = Math.max(
+    0,
+    subtotal - discountAmount
+  );
 
   const totalItems = useMemo(() => {
     return validCartItems.reduce(
@@ -147,6 +198,62 @@ const Checkout = () => {
     }));
   };
 
+  const handleApplyCoupon = async () => {
+    const code = couponCode
+      .trim()
+      .toUpperCase();
+
+    if (!code) {
+      setCouponError(
+        "Please enter a coupon code."
+      );
+      return;
+    }
+
+    try {
+      setCouponLoading(true);
+      setCouponError("");
+
+      const response = await apiFetch(
+        "/api/coupons/validate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            code,
+            subtotal,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Invalid coupon code."
+        );
+      }
+
+      setCoupon(data.coupon);
+      setCouponCode(data.coupon.code);
+      setCouponError("");
+    } catch (error) {
+      setCoupon(null);
+      setCouponError(error.message);
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setCoupon(null);
+    setCouponCode("");
+    setCouponError("");
+  };
+
   const handleContinue = async (event) => {
     event.preventDefault();
 
@@ -163,10 +270,6 @@ const Checkout = () => {
       return;
     }
 
-    /*
-      Do not attempt payment if there are no valid
-      products remaining in the cart.
-    */
     if (!validCartItems.length) {
       setError(
         "Your cart has no available products. Please return to your cart and add an available product."
@@ -189,7 +292,16 @@ const Checkout = () => {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(address),
+          body: JSON.stringify({
+            ...address,
+
+            /*
+              Coupon information is sent to the
+              backend so the backend can apply
+              the discount securely.
+            */
+            couponCode: coupon?.code || null,
+          }),
         }
       );
 
@@ -328,6 +440,7 @@ const Checkout = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+
         {/* Header */}
         <div className="mb-8">
           <Link
@@ -355,8 +468,10 @@ const Checkout = () => {
         )}
 
         <div className="grid gap-8 lg:grid-cols-[1fr_380px]">
+
           {/* Left side */}
           <div className="space-y-6">
+
             {/* Progress */}
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3">
@@ -409,6 +524,7 @@ const Checkout = () => {
               </div>
 
               <div className="mt-6 grid gap-5 sm:grid-cols-2">
+
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="fullName"
@@ -552,6 +668,7 @@ const Checkout = () => {
 
           {/* Order summary */}
           <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:sticky lg:top-24">
+
             <div className="flex items-center justify-between border-b border-gray-100 pb-5">
               <div>
                 <h2 className="font-semibold text-gray-950">
@@ -624,7 +741,107 @@ const Checkout = () => {
               })}
             </div>
 
+            {/* Coupon */}
             <div className="mt-6 border-t border-gray-100 pt-5">
+              <div className="flex items-center gap-2">
+                <Tag
+                  size={18}
+                  className="text-gray-700"
+                />
+
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Coupon / Promo Code
+                </h3>
+              </div>
+
+              {!coupon ? (
+                <div className="mt-3">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={(event) => {
+                        setCouponCode(
+                          event.target.value.toUpperCase()
+                        );
+                        setCouponError("");
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleApplyCoupon();
+                        }
+                      }}
+                      placeholder="Enter coupon code"
+                      className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-3 text-sm uppercase outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={handleApplyCoupon}
+                      disabled={couponLoading}
+                      className="shrink-0 rounded-xl bg-gray-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {couponLoading ? (
+                        <LoaderCircle
+                          size={18}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        "Apply"
+                      )}
+                    </button>
+                  </div>
+
+                  {couponError && (
+                    <p className="mt-2 text-xs text-red-600">
+                      {couponError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-green-200 bg-green-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <CheckCircle
+                        size={18}
+                        className="mt-0.5 shrink-0 text-green-600"
+                      />
+
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-green-800">
+                          {coupon.code}
+                        </p>
+
+                        <p className="mt-1 text-xs text-green-700">
+                          {coupon.discountType ===
+                          "percentage"
+                            ? `${coupon.discountValue}% discount`
+                            : `₦${Number(
+                                coupon.discountValue
+                              ).toLocaleString()} discount`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={
+                        handleRemoveCoupon
+                      }
+                      className="rounded-lg p-1 text-green-700 transition hover:bg-green-100"
+                      aria-label="Remove coupon"
+                    >
+                      <X size={17} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Totals */}
+            <div className="mt-6 border-t border-gray-100 pt-5">
+
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500">
                   Subtotal
@@ -634,6 +851,19 @@ const Checkout = () => {
                   ₦{subtotal.toLocaleString()}
                 </span>
               </div>
+
+              {coupon && discountAmount > 0 && (
+                <div className="mt-3 flex items-center justify-between text-sm">
+                  <span className="text-green-600">
+                    Coupon discount
+                  </span>
+
+                  <span className="font-semibold text-green-600">
+                    -₦
+                    {discountAmount.toLocaleString()}
+                  </span>
+                </div>
+              )}
 
               <div className="mt-3 flex items-center justify-between text-sm">
                 <span className="text-gray-500">
@@ -651,7 +881,7 @@ const Checkout = () => {
                 </span>
 
                 <span className="text-xl font-bold text-gray-950">
-                  ₦{subtotal.toLocaleString()}
+                  ₦{finalTotal.toLocaleString()}
                 </span>
               </div>
             </div>
