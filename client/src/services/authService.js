@@ -43,19 +43,104 @@ export const loginUser = async (credentials) => {
 
   const data = await response.json();
 
+  /*
+   * A login verification response is not an error.
+   *
+   * The password was correct, but Vendora requires
+   * an email verification code for this device.
+   */
+  if (
+    response.ok &&
+    data.requiresLoginVerification
+  ) {
+    return data;
+  }
+
   if (!response.ok) {
     throw new Error(
       data.message || "Login failed"
     );
   }
 
-  // Save the JWT as a fallback for browsers
-  // that don't send the authentication cookie.
   if (data.token) {
     localStorage.setItem(
       "vendora_token",
       data.token
     );
+  }
+
+  return data;
+};
+
+// VERIFY LOGIN CODE
+export const verifyLoginCode = async ({
+  email,
+  code,
+}) => {
+  const response = await fetch(
+    `${API_URL}/verify-login`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        email,
+        code,
+      }),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+        "Login verification failed"
+    );
+  }
+
+  if (data.token) {
+    localStorage.setItem(
+      "vendora_token",
+      data.token
+    );
+  }
+
+  return data;
+};
+
+// RESEND LOGIN CODE
+export const resendLoginCode = async (
+  email
+) => {
+  const response = await fetch(
+    `${API_URL}/resend-login-code`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        email,
+      }),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    const error = new Error(
+      data.message ||
+        "Unable to resend login verification code"
+    );
+
+    error.resendAvailableIn =
+      data.resendAvailableIn;
+
+    throw error;
   }
 
   return data;
@@ -71,11 +156,14 @@ export const getCurrentUser = async () => {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}/me`, {
-    method: "GET",
-    headers,
-    credentials: "include",
-  });
+  const response = await fetch(
+    `${API_URL}/me`,
+    {
+      method: "GET",
+      headers,
+      credentials: "include",
+    }
+  );
 
   const data = await response.json();
 
@@ -98,16 +186,20 @@ export const logoutUser = async () => {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}/logout`, {
-    method: "POST",
-    headers,
-    credentials: "include",
-  });
+  const response = await fetch(
+    `${API_URL}/logout`,
+    {
+      method: "POST",
+      headers,
+      credentials: "include",
+    }
+  );
 
   const data = await response.json();
 
-  // Always remove the fallback token on logout
-  localStorage.removeItem("vendora_token");
+  localStorage.removeItem(
+    "vendora_token"
+  );
 
   if (!response.ok) {
     throw new Error(

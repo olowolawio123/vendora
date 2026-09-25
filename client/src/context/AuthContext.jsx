@@ -10,6 +10,8 @@ import {
   loginUser,
   logoutUser,
   registerUser,
+  verifyLoginCode,
+  resendLoginCode,
 } from "../services/authService";
 
 const AuthContext = createContext(null);
@@ -40,12 +42,22 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (userData) => {
     const data = await registerUser(userData);
-
     return data;
   };
 
   const login = async (credentials) => {
     const data = await loginUser(credentials);
+
+    /*
+     * If this device needs email verification,
+     * do not set the user yet.
+     *
+     * The login is only completed after the
+     * verification code is successfully entered.
+     */
+    if (data.requiresLoginVerification) {
+      return data;
+    }
 
     if (data.token) {
       localStorage.setItem(
@@ -54,9 +66,40 @@ export const AuthProvider = ({ children }) => {
       );
     }
 
-    setUser(data.user);
+    if (data.user) {
+      setUser(data.user);
+    }
 
     return data;
+  };
+
+  const verifyLogin = async ({
+    email,
+    code,
+  }) => {
+    const data = await verifyLoginCode({
+      email,
+      code,
+    });
+
+    if (data.token) {
+      localStorage.setItem(
+        "vendora_token",
+        data.token
+      );
+    }
+
+    if (data.user) {
+      setUser(data.user);
+    }
+
+    return data;
+  };
+
+  const resendLoginVerification = async (
+    email
+  ) => {
+    return await resendLoginCode(email);
   };
 
   const logout = async () => {
@@ -73,6 +116,8 @@ export const AuthProvider = ({ children }) => {
     loading,
     register,
     login,
+    verifyLogin,
+    resendLoginVerification,
     logout,
   };
 
